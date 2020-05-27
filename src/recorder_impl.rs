@@ -13,6 +13,14 @@ macro_rules! check {
     }
 }
 
+macro_rules! no_side_effect {
+    ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
+        {
+            $self .inner_gl. $method ( $( $arg ),* )
+        }
+    }
+}
+
 macro_rules! simple {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         {
@@ -129,7 +137,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn pixel_store_i(&self, name: GLenum, param: GLint) {
-        unimplemented!("pixel_store_i");
+        simple!(self.pixel_store_i(name, param))
     }
 
     fn gen_buffers(&self, n: GLsizei) -> Vec<GLuint> {
@@ -237,7 +245,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn active_texture(&self, texture: GLenum) {
-        unimplemented!("active_texture");
+        simple!(self.active_texture(texture))
     }
 
     fn attach_shader(&self, program: GLuint, shader: GLuint) {
@@ -278,11 +286,11 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn bind_buffer(&self, target: GLenum, buffer: GLuint) {
-        unimplemented!("bind_buffer");
+        simple!(self.bind_buffer(target, buffer))
     }
 
     fn bind_vertex_array(&self, vao: GLuint) {
-        unimplemented!("bind_vertex_array");
+        simple!(self.bind_vertex_array(vao))
     }
 
     fn bind_vertex_array_apple(&self, vao: GLuint) {
@@ -298,7 +306,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn bind_texture(&self, target: GLenum, texture: GLuint) {
-        unimplemented!("bind_texture");
+        simple!(self.bind_texture(target, texture));
     }
 
     fn draw_buffers(&self, bufs: &[GLenum]) {
@@ -512,22 +520,22 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     unsafe fn get_integer_v(&self, name: GLenum, result: &mut [GLint]) {
-        unimplemented!("get_integer_v");
+        no_side_effect!(self.get_integer_v(name, result))
     }
     unsafe fn get_integer_64v(&self, name: GLenum, result: &mut [GLint64]) {
-        unimplemented!("get_integer_64v");
+        no_side_effect!(self.get_integer_64v(name, result))
     }
     unsafe fn get_integer_iv(&self, name: GLenum, index: GLuint, result: &mut [GLint]) {
-        unimplemented!("get_integer_iv");
+        no_side_effect!(self.get_integer_iv(name, index, result))
     }
     unsafe fn get_integer_64iv(&self, name: GLenum, index: GLuint, result: &mut [GLint64]) {
-        unimplemented!("get_integer_64iv");
+        no_side_effect!(self.get_integer_64iv(name, index, result))
     }
     unsafe fn get_boolean_v(&self, name: GLenum, result: &mut [GLboolean]) {
-        unimplemented!("get_boolean_v");
+        no_side_effect!(self.get_boolean_v(name, result))
     }
     unsafe fn get_float_v(&self, name: GLenum, result: &mut [GLfloat]) {
-        unimplemented!("get_float_v");
+        no_side_effect!(self.get_float_v(name, result))
     }
 
 
@@ -641,7 +649,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn use_program(&self, program: GLuint) {
-        unimplemented!("use_program");
+        simple!(self.use_program(program))
     }
 
     fn validate_program(&self, program: GLuint) {
@@ -911,9 +919,11 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     fn program_parameter_i(&self, program: GLuint, pname: GLenum, value: GLint) {
         unimplemented!("program_parameter_i");
     }
+
     unsafe fn get_vertex_attrib_iv(&self, index: GLuint, pname: GLenum, result: &mut [GLint]) {
         unimplemented!("get_vertex_attrib_iv");
     }
+
     unsafe fn get_vertex_attrib_fv(&self, index: GLuint, pname: GLenum, result: &mut [GLfloat]) {
         unimplemented!("get_vertex_attrib_fv");
     }
@@ -931,12 +941,13 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn get_string(&self, which: GLenum) -> String {
-        simple!(self.get_string(which))
+        no_side_effect!(self.get_string(which))
     }
 
     fn get_string_i(&self, which: GLenum, index: GLuint) -> String {
-        unimplemented!("get_string_i");
+        no_side_effect!(self.get_string_i(which, index))
     }
+
     unsafe fn get_shader_iv(&self, shader: GLuint, pname: GLenum, result: &mut [GLint]) {
         unimplemented!("get_shader_iv");
     }
@@ -977,7 +988,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
-        simple!(self.clear_color(r, g, b, a))
+        no_side_effect!(self.clear_color(r, g, b, a))
     }
 
     fn clear(&self, buffer_mask: GLbitfield) {
@@ -1001,7 +1012,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn get_error(&self) -> GLenum {
-        unimplemented!("get_error");
+        no_side_effect!(self.get_error())
     }
 
     fn stencil_mask(&self, mask: GLuint) {

@@ -2,7 +2,7 @@
 
 #![allow(unused_imports)]
 
-use gleam::gl::{GLenum, GLsizeiptr, GLvoid};
+use gleam::gl::{GLenum, GLint, GLsizeiptr, GLuint, GLvoid};
 
 /// An identifier for a memory buffer passing data to GL.
 ///
@@ -31,5 +31,12 @@ pub struct BufFromGl(pub usize);
 pub enum Call {
     buffer_data_untyped { target: GLenum, size_data: BufToGl, usage: GLenum },
     clear_color { r: f32, g: f32, b: f32, a: f32 },
-    get_string { which: GLenum },
+    active_texture { texture: GLenum },
+    bind_texture { target: GLenum, texture: GLuint },
+    use_program { program: GLuint },
+    bind_vertex_array { vao: GLuint },
+    pixel_store_i { name: GLenum, param: GLint },
+    bind_buffer { target: GLenum, buffer: GLuint },
 }
+
+
