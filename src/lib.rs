@@ -25,17 +25,17 @@
 //! [`Recorder`]: struct.Recorder.html
 //! [`Replayer`]: struct.Replayer.html
 
-use gleam::gl::{Gl, GLvoid, GLsizeiptr};
-use std::{io, sync};
+use gleam::gl::{GLsizeiptr, GLvoid, Gl};
 use std::ops::Deref;
 use std::path::Path;
+use std::{io, sync};
 
 mod call;
+mod files;
 mod raw;
 mod recorder_impl;
-mod files;
 
-pub use call::{Call, BufToGl, BufFromGl};
+pub use call::{BufFromGl, BufToGl, Call};
 pub use files::Files;
 
 /// A trait for types that can serialize GL method call streams.
@@ -45,8 +45,8 @@ pub trait Serializer {
     /// Write the method call `call`.
     fn write_call(&mut self, call: &call::Call) -> Result<(), Self::Error>;
 
-    /// Write the contents of the buffer `buf`, and label it with `ident`.
-    fn write_buffer(&mut self, buf: &[u8], ident: usize) -> Result<(), Self::Error>;
+    /// Write the contents of the buffer `buf`, and return an identifier for it.
+    fn write_buffer(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
 
     /// Flush buffers, if any.
     fn flush(&mut self) -> Result<(), Self::Error>;
@@ -59,9 +59,6 @@ pub struct Recorder<G, S> {
 
 pub(crate) struct Locked<S> {
     serializer: S,
-
-    /// The identifier to assign the next buffer we serialize.
-    next_buffer_id: usize,
 }
 
 impl<G, S> Recorder<G, S> {
@@ -73,15 +70,16 @@ impl<G, S> Recorder<G, S> {
     ///
     /// [`gleam::Gl`]: https://docs.rs/gleam/0.11.0/gleam/gl/trait.Gl.html
     pub fn with_serializer(inner_gl: G, serializer: S) -> Recorder<G, S>
-    where S: Serializer,
-          G: Deref,
-          G::Target: Gl,
+    where
+        S: Serializer,
+        G: Deref,
+        G::Target: Gl,
     {
         let locked = Locked::new(serializer);
 
         Recorder {
             inner_gl,
-            locked: sync::Mutex::new(locked)
+            locked: sync::Mutex::new(locked),
         }
     }
 
@@ -90,9 +88,10 @@ impl<G, S> Recorder<G, S> {
     /// The `path` argument is the name of a directory to create to hold the
     /// various recording files.
     pub fn to_file<P>(inner_gl: G, path: P) -> io::Result<Recorder<G, Files>>
-    where P: AsRef<Path>,
-          G: Deref,
-          G::Target: Gl,
+    where
+        P: AsRef<Path>,
+        G: Deref,
+        G::Target: Gl,
     {
         Ok(Recorder::with_serializer(inner_gl, Files::create(path)?))
     }
@@ -104,23 +103,34 @@ impl<G, S> Recorder<G, S> {
 
 impl<S> Locked<S> {
     fn new(serializer: S) -> Locked<S> {
-        Locked {
-            serializer,
-            next_buffer_id: 0
-        }
+        Locked { serializer }
     }
 
-    pub(crate) fn write_buffer(&mut self, data: *const GLvoid, size: GLsizeiptr) -> Result<call::BufToGl, S::Error>
-        where S: Serializer
+    pub(crate) fn write_call(&mut self, call: &call::Call) -> Result<(), S::Error>
+    where
+        S: Serializer,
+    {
+        self.serializer.write_call(call)
+    }
+
+    pub(crate) fn write_slice<T: Copy>(&mut self, slice: &[T]) -> Result<usize, S::Error>
+    where
+        S: Serializer,
+    {
+        self.serializer.write_buffer(raw::slice_as_bytes(slice))
+    }
+
+    pub(crate) fn write_gl_buffer(
+        &mut self,
+        data: *const GLvoid,
+        size: GLsizeiptr,
+    ) -> Result<call::BufToGl, S::Error>
+    where
+        S: Serializer,
     {
         let scope = ();
-        let buf = unsafe {
-            raw::slice_from_buf(&scope, data, size)
-        };
-        let ident = self.next_buffer_id;
-        self.next_buffer_id += 1;
-        self.serializer.write_buffer(buf, ident)?;
-        Ok(call::BufToGl(ident))
+        let buf = unsafe { raw::slice_from_gl_buffer(&scope, data, size) };
+        Ok(call::BufToGl(self.write_slice(buf)?))
     }
 }
 
@@ -131,8 +141,9 @@ impl<G, S> Recorder<UnboxedGl<G>, S> {
     /// this constructor takes an `inner_gl` value that implements `Gl`
     /// directly.
     pub fn with_serializer_unboxed(inner_gl: G, serializer: S) -> Recorder<UnboxedGl<G>, S>
-    where S: Serializer,
-          G: Gl,
+    where
+        S: Serializer,
+        G: Gl,
     {
         Recorder::with_serializer(UnboxedGl(inner_gl), serializer)
     }
@@ -140,10 +151,14 @@ impl<G, S> Recorder<UnboxedGl<G>, S> {
 
 impl<G> Recorder<UnboxedGl<G>, Files> {
     pub fn to_file_unboxed<P>(inner_gl: G, path: P) -> io::Result<Recorder<UnboxedGl<G>, Files>>
-    where P: AsRef<Path>,
-          G: Gl,
+    where
+        P: AsRef<Path>,
+        G: Gl,
     {
-        Ok(Recorder::with_serializer_unboxed(inner_gl, Files::create(path)?))
+        Ok(Recorder::with_serializer_unboxed(
+            inner_gl,
+            Files::create(path)?,
+        ))
     }
 }
 
@@ -151,5 +166,7 @@ pub struct UnboxedGl<T>(T);
 
 impl<T> Deref for UnboxedGl<T> {
     type Target = T;
-    fn deref(&self) -> &T { &self.0 }
+    fn deref(&self) -> &T {
+        &self.0
+    }
 }

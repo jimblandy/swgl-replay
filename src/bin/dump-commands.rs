@@ -1,7 +1,7 @@
 use docopt::Docopt;
 use serde::Deserialize;
-use std::{fs, io, mem, path};
 use std::io::prelude::*;
+use std::{fs, io, mem, path};
 
 use gl_replay::Call;
 
@@ -41,7 +41,9 @@ fn main() -> io::Result<()> {
             call: Call,
         };
 
-        let mut buf = CallBuffer { bytes: [0; mem::size_of::<Call>()]} ;
+        let mut buf = CallBuffer {
+            bytes: [0; mem::size_of::<Call>()],
+        };
         loop {
             match file.read_exact(unsafe { &mut buf.bytes }) {
                 Err(e) => {
@@ -50,7 +52,7 @@ fn main() -> io::Result<()> {
                     }
                     return Err(e);
                 }
-                Ok(()) => ()
+                Ok(()) => (),
             };
 
             let call = unsafe { buf.call };

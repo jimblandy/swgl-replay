@@ -1,8 +1,8 @@
 //! A `Serializer` that saves method calls in files.
 
-use std::{fs, io};
 use std::io::Write;
 use std::path::Path;
+use std::{fs, io, mem};
 
 use super::Serializer;
 use crate::{call, raw};
@@ -10,7 +10,8 @@ use crate::{call, raw};
 /// A stream of Gl method calls being written to files.
 pub struct Files {
     calls: io::BufWriter<fs::File>,
-    //large: io::BufWriter<fs::File>,
+    variable: io::BufWriter<fs::File>,
+    next_variable_offset: usize,
 }
 
 impl Files {
@@ -21,19 +22,29 @@ impl Files {
             Err(e) if e.kind() != io::ErrorKind::AlreadyExists => {
                 return Err(e);
             }
-            _ => ()
-
+            _ => (),
         }
 
         let mut calls = io::BufWriter::new(fs::File::create(dir.join("calls"))?);
-        assert!(std::mem::size_of::<call::Call>() <= 255);
-        calls.write_all(&[b'G', b'L', b'R', b'R',
-                          std::mem::size_of::<call::Call>() as u8,
-                          0, 0, 0])?;
+        let variable = io::BufWriter::new(fs::File::create(dir.join("variable"))?);
+
+        // Write a header to the file.
+        assert!(mem::size_of::<call::Call>() <= 255);
+        calls.write_all(&[
+            b'G',
+            b'L',
+            b'R',
+            b'R',
+            mem::size_of::<call::Call>() as u8,
+            0,
+            0,
+            0,
+        ])?;
 
         Ok(Files {
             calls,
-            //large: io::BufWriter::new(fs::File::create(dir.join("large"))?),
+            variable,
+            next_variable_offset: 0,
         })
     }
 }
@@ -46,14 +57,21 @@ impl Serializer for Files {
         Ok(())
     }
 
-    fn write_buffer(&mut self, buf: &[u8], ident: usize) -> Result<(), Self::Error> {
-        self.calls.write_all(raw::as_bytes(&ident))?;
-        self.calls.write_all(buf)?;
-        Ok(())
+    fn write_buffer(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        let start_offset = self.next_variable_offset;
+        self.next_variable_offset = self
+            .next_variable_offset
+            .checked_add(mem::size_of::<usize>() + buf.len())
+            .expect("overflow in gl-replay variable log offset");
+
+        self.variable.write_all(raw::as_bytes(&buf.len()))?;
+        self.variable.write_all(buf)?;
+        Ok(start_offset)
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
         self.calls.flush()?;
+        self.variable.flush()?;
         Ok(())
     }
 }

@@ -4,15 +4,17 @@ use gleam::gl::*;
 use std::ops::Deref;
 use std::os::raw::{c_int, c_void};
 
-use crate::call::Call;
 use super::{Recorder, Serializer};
+use crate::call::{Call, BufFromGl, BufToGl};
 
 macro_rules! check {
     ($call:expr) => {
         $call.expect("gl-replay serialization failure")
-    }
+    };
 }
 
+/// General form of call that has no side effects, and hence doesn't need to be
+/// recorded.
 macro_rules! no_side_effect {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         {
@@ -21,62 +23,111 @@ macro_rules! no_side_effect {
     }
 }
 
+/// General form of a recorded call. Always makes the call, and returns its value.
+macro_rules! general {
+    (
+        let $returned:ident = $self:ident . $method:ident ( $( $arg:ident ),* );
+        lock $locked:ident;
+        $body:expr
+    ) => {
+        {
+            let $returned = $self .inner_gl. $method ( $( $arg ),* );
+            let mut $locked = $self .locked.lock().unwrap();
+
+            $body;
+
+            // For debugging.
+            $locked .serializer.flush()
+                .expect("gl-replay serialization failure");
+
+            $returned
+        }
+    }
+}
+
 macro_rules! simple {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
-        {
-            let mut locked = $self .locked.lock().unwrap();
+        general! {
+            let returned = $self . $method ( $( $arg ),* );
+            lock locked;
+            {
+                locked.write_call(&Call:: $method { $( $arg ),* })
+                    .expect("gl-replay serialization failure");
+            }
+        }
+    }
+}
 
-            locked.serializer.write_call(&Call:: $method { $( $arg ),* })
-                .expect("gl-replay serialization failure");
-            locked.serializer.flush()
-                .expect("gl-replay serialization failure");
-
-            $self .inner_gl. $method ( $( $arg ),* )
+macro_rules! gen_things {
+    ($self:ident . $method:ident ( $n:ident )) => {
+        general! {
+            let returned = $self . $method ( $n );
+            lock locked;
+            {
+                // Save the returned vector, so we can check it on replay.
+                let ident = BufFromGl(check!(locked.write_slice(&returned)));
+                check!(locked.write_call(&Call::$method {
+                    n: $n,
+                    returned: ident,
+                }));
+            }
         }
     }
 }
 
 #[allow(unused_variables)]
 impl<G, S> gleam::gl::Gl for Recorder<G, S>
-    where G: Deref,
-          G::Target: Gl,
-          S: Serializer,
+where
+    G: Deref,
+    G::Target: Gl,
+    S: Serializer,
 {
     fn get_type(&self) -> GlType {
         self.inner_gl.get_type()
     }
 
-    fn buffer_data_untyped(&self,
-                            target: GLenum,
-                            size: GLsizeiptr,
-                            data: *const GLvoid,
-                            usage: GLenum) {
-        let mut locked = self.locked.lock().unwrap();
-        let size_data = check!(locked.write_buffer(data, size));
-        check!(locked.serializer.write_call(&Call::buffer_data_untyped { target, size_data, usage }));
-
-        self.inner_gl.buffer_data_untyped(target, size, data, usage)
+    fn buffer_data_untyped(
+        &self,
+        target: GLenum,
+        size: GLsizeiptr,
+        data: *const GLvoid,
+        usage: GLenum,
+    ) {
+        general! {
+            let returned = self.buffer_data_untyped(target, size, data, usage);
+            lock locked;
+            {
+                let size_data = check!(locked.write_gl_buffer(data, size));
+                check!(locked.write_call(&Call::buffer_data_untyped {
+                    target,
+                    size_data,
+                    usage
+                }));
+            }
+        }
     }
 
-    fn buffer_sub_data_untyped(&self,
-                                target: GLenum,
-                                offset: isize,
-                                size: GLsizeiptr,
-                                data: *const GLvoid) {
+    fn buffer_sub_data_untyped(
+        &self,
+        target: GLenum,
+        offset: isize,
+        size: GLsizeiptr,
+        data: *const GLvoid,
+    ) {
         unimplemented!("buffer_sub_data_untyped");
     }
 
-    fn map_buffer(&self,
-                  target: GLenum,
-                  access: GLbitfield) -> *mut c_void {
+    fn map_buffer(&self, target: GLenum, access: GLbitfield) -> *mut c_void {
         unimplemented!("map_buffer");
     }
 
-    fn map_buffer_range(&self,
-                        target: GLenum,
-                        offset: GLintptr,
-                        length: GLsizeiptr,
-                        access: GLbitfield) -> *mut c_void {
+    fn map_buffer_range(
+        &self,
+        target: GLenum,
+        offset: GLintptr,
+        length: GLsizeiptr,
+        access: GLbitfield,
+    ) -> *mut c_void {
         unimplemented!("map_buffer_range");
     }
 
@@ -96,35 +147,40 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("read_buffer");
     }
 
-    fn read_pixels_into_buffer(&self,
-                                x: GLint,
-                                y: GLint,
-                                width: GLsizei,
-                                height: GLsizei,
-                                format: GLenum,
-                                pixel_type: GLenum,
-                                dst_buffer: &mut [u8]) {
+    fn read_pixels_into_buffer(
+        &self,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        pixel_type: GLenum,
+        dst_buffer: &mut [u8],
+    ) {
         unimplemented!("read_pixels_into_buffer");
     }
 
-    fn read_pixels(&self,
-                    x: GLint,
-                    y: GLint,
-                    width: GLsizei,
-                    height: GLsizei,
-                    format: GLenum,
-                    pixel_type: GLenum)
-                    -> Vec<u8> {
+    fn read_pixels(
+        &self,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        pixel_type: GLenum,
+    ) -> Vec<u8> {
         unimplemented!("read_pixels");
     }
 
-    unsafe fn read_pixels_into_pbo(&self,
-                                   x: GLint,
-                                   y: GLint,
-                                   width: GLsizei,
-                                   height: GLsizei,
-                                   format: GLenum,
-                                   pixel_type: GLenum) {
+    unsafe fn read_pixels_into_pbo(
+        &self,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        pixel_type: GLenum,
+    ) {
         unimplemented!("read_pixels_into_pbo");
     }
 
@@ -141,31 +197,31 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn gen_buffers(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_buffers");
+        gen_things!(self.gen_buffers(n))
     }
 
     fn gen_renderbuffers(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_renderbuffers");
+        gen_things!(self.gen_renderbuffers(n))
     }
 
     fn gen_framebuffers(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_framebuffers");
+        gen_things!(self.gen_framebuffers(n))
     }
 
     fn gen_textures(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_textures");
+        gen_things!(self.gen_textures(n))
     }
 
     fn gen_vertex_arrays(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_vertex_arrays");
+        gen_things!(self.gen_vertex_arrays(n))
     }
 
     fn gen_vertex_arrays_apple(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_vertex_arrays_apple");
+        gen_things!(self.gen_vertex_arrays_apple(n))
     }
 
     fn gen_queries(&self, n: GLsizei) -> Vec<GLuint> {
-        unimplemented!("gen_queries");
+        gen_things!(self.gen_queries(n))
     }
 
     fn begin_query(&self, target: GLenum, id: GLuint) {
@@ -224,19 +280,23 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("delete_textures");
     }
 
-    fn framebuffer_renderbuffer(&self,
-                                target: GLenum,
-                                attachment: GLenum,
-                                renderbuffertarget: GLenum,
-                                renderbuffer: GLuint) {
+    fn framebuffer_renderbuffer(
+        &self,
+        target: GLenum,
+        attachment: GLenum,
+        renderbuffertarget: GLenum,
+        renderbuffer: GLuint,
+    ) {
         unimplemented!("framebuffer_renderbuffer");
     }
 
-    fn renderbuffer_storage(&self,
-                            target: GLenum,
-                            internalformat: GLenum,
-                            width: GLsizei,
-                            height: GLsizei) {
+    fn renderbuffer_storage(
+        &self,
+        target: GLenum,
+        internalformat: GLenum,
+        width: GLsizei,
+        height: GLsizei,
+    ) {
         unimplemented!("renderbuffer_storage");
     }
 
@@ -266,7 +326,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("get_uniform_block_index");
     }
 
-    fn get_uniform_indices(&self,  program: GLuint, names: &[&str]) -> Vec<GLuint> {
+    fn get_uniform_indices(&self, program: GLuint, names: &[&str]) -> Vec<GLuint> {
         unimplemented!("get_uniform_indices");
     }
 
@@ -274,14 +334,23 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("bind_buffer_base");
     }
 
-    fn bind_buffer_range(&self, target: GLenum, index: GLuint, buffer: GLuint, offset: GLintptr, size: GLsizeiptr) {
+    fn bind_buffer_range(
+        &self,
+        target: GLenum,
+        index: GLuint,
+        buffer: GLuint,
+        offset: GLintptr,
+        size: GLsizeiptr,
+    ) {
         unimplemented!("bind_buffer_range");
     }
 
-    fn uniform_block_binding(&self,
-                                program: GLuint,
-                                uniform_block_index: GLuint,
-                                uniform_block_binding: GLuint) {
+    fn uniform_block_binding(
+        &self,
+        program: GLuint,
+        uniform_block_index: GLuint,
+        uniform_block_binding: GLuint,
+    ) {
         unimplemented!("uniform_block_binding");
     }
 
@@ -306,216 +375,268 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn bind_texture(&self, target: GLenum, texture: GLuint) {
-        simple!(self.bind_texture(target, texture));
+        simple!(self.bind_texture(target, texture))
     }
 
     fn draw_buffers(&self, bufs: &[GLenum]) {
         unimplemented!("draw_buffers");
     }
 
-    fn tex_image_2d(&self,
-                    target: GLenum,
-                    level: GLint,
-                    internal_format: GLint,
-                    width: GLsizei,
-                    height: GLsizei,
-                    border: GLint,
-                    format: GLenum,
-                    ty: GLenum,
-                    opt_data: Option<&[u8]>) {
+    fn tex_image_2d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        internal_format: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        border: GLint,
+        format: GLenum,
+        ty: GLenum,
+        opt_data: Option<&[u8]>,
+    ) {
         unimplemented!("tex_image_2d");
     }
 
-    fn compressed_tex_image_2d(&self,
-                                target: GLenum,
-                                level: GLint,
-                                internal_format: GLenum,
-                                width: GLsizei,
-                                height: GLsizei,
-                                border: GLint,
-                                data: &[u8]) {
+    fn compressed_tex_image_2d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        internal_format: GLenum,
+        width: GLsizei,
+        height: GLsizei,
+        border: GLint,
+        data: &[u8],
+    ) {
         unimplemented!("compressed_tex_image_2d");
     }
 
-    fn compressed_tex_sub_image_2d(&self,
-                                    target: GLenum,
-                                    level: GLint,
-                                    xoffset: GLint,
-                                    yoffset: GLint,
-                                    width: GLsizei,
-                                    height: GLsizei,
-                                    format: GLenum,
-                                    data: &[u8]) {
+    fn compressed_tex_sub_image_2d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        data: &[u8],
+    ) {
         unimplemented!("compressed_tex_sub_image_2d");
     }
 
-    fn tex_image_3d(&self,
-                    target: GLenum,
-                    level: GLint,
-                    internal_format: GLint,
-                    width: GLsizei,
-                    height: GLsizei,
-                    depth: GLsizei,
-                    border: GLint,
-                    format: GLenum,
-                    ty: GLenum,
-                    opt_data: Option<&[u8]>) {
-        unimplemented!("tex_image_3d");
+    fn tex_image_3d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        internal_format: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        depth: GLsizei,
+        border: GLint,
+        format: GLenum,
+        ty: GLenum,
+        opt_data: Option<&[u8]>,
+    ) {
+        general! {
+            let returned = self.tex_image_3d(target, level, internal_format, width, height, depth,
+                                             border, format, ty, opt_data);
+            lock locked;
+            {
+                let opt_data = opt_data.map(|slice| {
+                    BufToGl(check!(locked.write_slice(slice)))
+                });
+                check!(locked.write_call(&Call::tex_image_3d {
+                    target, level, internal_format, width, height, depth, border, format, ty, opt_data
+                }));
+            }
+        }
     }
 
-    fn copy_tex_image_2d(&self,
-                            target: GLenum,
-                            level: GLint,
-                            internal_format: GLenum,
-                            x: GLint,
-                            y: GLint,
-                            width: GLsizei,
-                            height: GLsizei,
-                            border: GLint) {
+    fn copy_tex_image_2d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        internal_format: GLenum,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        border: GLint,
+    ) {
         unimplemented!("copy_tex_image_2d");
     }
 
-    fn copy_tex_sub_image_2d(&self,
-                                target: GLenum,
-                                level: GLint,
-                                xoffset: GLint,
-                                yoffset: GLint,
-                                x: GLint,
-                                y: GLint,
-                                width: GLsizei,
-                                height: GLsizei) {
+    fn copy_tex_sub_image_2d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+    ) {
         unimplemented!("copy_tex_sub_image_2d");
     }
 
-    fn copy_tex_sub_image_3d(&self,
-                                target: GLenum,
-                                level: GLint,
-                                xoffset: GLint,
-                                yoffset: GLint,
-                                zoffset: GLint,
-                                x: GLint,
-                                y: GLint,
-                                width: GLsizei,
-                                height: GLsizei) {
+    fn copy_tex_sub_image_3d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        zoffset: GLint,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+    ) {
         unimplemented!("copy_tex_sub_image_3d");
     }
 
-    fn tex_sub_image_2d(&self,
-                        target: GLenum,
-                        level: GLint,
-                        xoffset: GLint,
-                        yoffset: GLint,
-                        width: GLsizei,
-                        height: GLsizei,
-                        format: GLenum,
-                        ty: GLenum,
-                        data: &[u8]) {
+    fn tex_sub_image_2d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        ty: GLenum,
+        data: &[u8],
+    ) {
         unimplemented!("tex_sub_image_2d");
     }
 
-    fn tex_sub_image_2d_pbo(&self,
-                            target: GLenum,
-                            level: GLint,
-                            xoffset: GLint,
-                            yoffset: GLint,
-                            width: GLsizei,
-                            height: GLsizei,
-                            format: GLenum,
-                            ty: GLenum,
-                            offset: usize) {
+    fn tex_sub_image_2d_pbo(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        format: GLenum,
+        ty: GLenum,
+        offset: usize,
+    ) {
         unimplemented!("tex_sub_image_2d_pbo");
     }
 
-    fn tex_sub_image_3d(&self,
-                        target: GLenum,
-                        level: GLint,
-                        xoffset: GLint,
-                        yoffset: GLint,
-                        zoffset: GLint,
-                        width: GLsizei,
-                        height: GLsizei,
-                        depth: GLsizei,
-                        format: GLenum,
-                        ty: GLenum,
-                        data: &[u8]) {
-        unimplemented!("tex_sub_image_3d");
+    fn tex_sub_image_3d(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        zoffset: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        depth: GLsizei,
+        format: GLenum,
+        ty: GLenum,
+        data: &[u8],
+    ) {
+        general! {
+            let returned = self.tex_sub_image_3d(target, level, xoffset, yoffset, zoffset, width, height, depth,
+                                  format, ty, data);
+            lock locked;
+            {
+                let data = BufToGl(check!(locked.write_slice(data)));
+                check!(locked.write_call(&Call::tex_sub_image_3d {
+                    target, level, xoffset, yoffset, zoffset, width, height, depth,
+                    format, ty, data
+                }));
+            }
+        }
     }
 
-    fn tex_sub_image_3d_pbo(&self,
-                            target: GLenum,
-                            level: GLint,
-                            xoffset: GLint,
-                            yoffset: GLint,
-                            zoffset: GLint,
-                            width: GLsizei,
-                            height: GLsizei,
-                            depth: GLsizei,
-                            format: GLenum,
-                            ty: GLenum,
-                            offset: usize) {
+    fn tex_sub_image_3d_pbo(
+        &self,
+        target: GLenum,
+        level: GLint,
+        xoffset: GLint,
+        yoffset: GLint,
+        zoffset: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        depth: GLsizei,
+        format: GLenum,
+        ty: GLenum,
+        offset: usize,
+    ) {
         unimplemented!("tex_sub_image_3d_pbo");
     }
 
-    fn tex_storage_2d(&self,
-                      target: GLenum,
-                      levels: GLint,
-                      internal_format: GLenum,
-                      width: GLsizei,
-                      height: GLsizei) {
+    fn tex_storage_2d(
+        &self,
+        target: GLenum,
+        levels: GLint,
+        internal_format: GLenum,
+        width: GLsizei,
+        height: GLsizei,
+    ) {
         unimplemented!("tex_storage_2d");
     }
 
-    fn tex_storage_3d(&self,
-                      target: GLenum,
-                      levels: GLint,
-                      internal_format: GLenum,
-                      width: GLsizei,
-                      height: GLsizei,
-                      depth: GLsizei) {
+    fn tex_storage_3d(
+        &self,
+        target: GLenum,
+        levels: GLint,
+        internal_format: GLenum,
+        width: GLsizei,
+        height: GLsizei,
+        depth: GLsizei,
+    ) {
         unimplemented!("tex_storage_3d");
     }
 
-    fn get_tex_image_into_buffer(&self,
-                                target: GLenum,
-                                level: GLint,
-                                format: GLenum,
-                                ty: GLenum,
-                                output: &mut [u8]) {
+    fn get_tex_image_into_buffer(
+        &self,
+        target: GLenum,
+        level: GLint,
+        format: GLenum,
+        ty: GLenum,
+        output: &mut [u8],
+    ) {
         unimplemented!("get_tex_image_into_buffer");
     }
-    unsafe fn copy_image_sub_data(&self,
-                                  src_name: GLuint,
-                                  src_target: GLenum,
-                                  src_level: GLint,
-                                  src_x: GLint,
-                                  src_y: GLint,
-                                  src_z: GLint,
-                                  dst_name: GLuint,
-                                  dst_target: GLenum,
-                                  dst_level: GLint,
-                                  dst_x: GLint,
-                                  dst_y: GLint,
-                                  dst_z: GLint,
-                                  src_width: GLsizei,
-                                  src_height: GLsizei,
-                                  src_depth: GLsizei) {
+    unsafe fn copy_image_sub_data(
+        &self,
+        src_name: GLuint,
+        src_target: GLenum,
+        src_level: GLint,
+        src_x: GLint,
+        src_y: GLint,
+        src_z: GLint,
+        dst_name: GLuint,
+        dst_target: GLenum,
+        dst_level: GLint,
+        dst_x: GLint,
+        dst_y: GLint,
+        dst_z: GLint,
+        src_width: GLsizei,
+        src_height: GLsizei,
+        src_depth: GLsizei,
+    ) {
         unimplemented!("copy_image_sub_data");
     }
 
-
-    fn invalidate_framebuffer(&self,
-                              target: GLenum,
-                              attachments: &[GLenum]) {
+    fn invalidate_framebuffer(&self, target: GLenum, attachments: &[GLenum]) {
         unimplemented!("invalidate_framebuffer");
     }
 
-    fn invalidate_sub_framebuffer(&self,
-                                  target: GLenum,
-                                  attachments: &[GLenum],
-                                  xoffset: GLint,
-                                  yoffset: GLint,
-                                  width: GLsizei,
-                                  height: GLsizei) {
+    fn invalidate_sub_framebuffer(
+        &self,
+        target: GLenum,
+        attachments: &[GLenum],
+        xoffset: GLint,
+        yoffset: GLint,
+        width: GLsizei,
+        height: GLsizei,
+    ) {
         unimplemented!("invalidate_sub_framebuffer");
     }
 
@@ -538,17 +659,16 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         no_side_effect!(self.get_float_v(name, result))
     }
 
-
-    fn get_framebuffer_attachment_parameter_iv(&self,
-                                            target: GLenum,
-                                            attachment: GLenum,
-                                            pname: GLenum) -> GLint {
+    fn get_framebuffer_attachment_parameter_iv(
+        &self,
+        target: GLenum,
+        attachment: GLenum,
+        pname: GLenum,
+    ) -> GLint {
         unimplemented!("get_framebuffer_attachment_parameter_iv");
     }
 
-    fn get_renderbuffer_parameter_iv(&self,
-                                     target: GLenum,
-                                     pname: GLenum) -> GLint {
+    fn get_renderbuffer_parameter_iv(&self, target: GLenum, pname: GLenum) -> GLint {
         unimplemented!("get_renderbuffer_parameter_iv");
     }
 
@@ -561,42 +681,48 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn tex_parameter_i(&self, target: GLenum, pname: GLenum, param: GLint) {
-        unimplemented!("tex_parameter_i");
+        simple!(self.tex_parameter_i(target, pname, param))
     }
 
     fn tex_parameter_f(&self, target: GLenum, pname: GLenum, param: GLfloat) {
-        unimplemented!("tex_parameter_f");
+        simple!(self.tex_parameter_f(target, pname, param))
     }
 
-    fn framebuffer_texture_2d(&self,
-                                target: GLenum,
-                                attachment: GLenum,
-                                textarget: GLenum,
-                                texture: GLuint,
-                                level: GLint) {
+    fn framebuffer_texture_2d(
+        &self,
+        target: GLenum,
+        attachment: GLenum,
+        textarget: GLenum,
+        texture: GLuint,
+        level: GLint,
+    ) {
         unimplemented!("framebuffer_texture_2d");
     }
 
-    fn framebuffer_texture_layer(&self,
-                                    target: GLenum,
-                                    attachment: GLenum,
-                                    texture: GLuint,
-                                    level: GLint,
-                                    layer: GLint) {
+    fn framebuffer_texture_layer(
+        &self,
+        target: GLenum,
+        attachment: GLenum,
+        texture: GLuint,
+        level: GLint,
+        layer: GLint,
+    ) {
         unimplemented!("framebuffer_texture_layer");
     }
 
-    fn blit_framebuffer(&self,
-                        src_x0: GLint,
-                        src_y0: GLint,
-                        src_x1: GLint,
-                        src_y1: GLint,
-                        dst_x0: GLint,
-                        dst_y0: GLint,
-                        dst_x1: GLint,
-                        dst_y1: GLint,
-                        mask: GLbitfield,
-                        filter: GLenum) {
+    fn blit_framebuffer(
+        &self,
+        src_x0: GLint,
+        src_y0: GLint,
+        src_x1: GLint,
+        src_y1: GLint,
+        dst_x0: GLint,
+        dst_y0: GLint,
+        dst_x1: GLint,
+        dst_y1: GLint,
+        mask: GLbitfield,
+        filter: GLenum,
+    ) {
         unimplemented!("blit_framebuffer");
     }
 
@@ -604,48 +730,54 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("vertex_attrib_4f");
     }
 
-    fn vertex_attrib_pointer_f32(&self,
-                                    index: GLuint,
-                                    size: GLint,
-                                    normalized: bool,
-                                    stride: GLsizei,
-                                    offset: GLuint) {
+    fn vertex_attrib_pointer_f32(
+        &self,
+        index: GLuint,
+        size: GLint,
+        normalized: bool,
+        stride: GLsizei,
+        offset: GLuint,
+    ) {
         unimplemented!("vertex_attrib_pointer_f32");
     }
 
-    fn vertex_attrib_pointer(&self,
-                            index: GLuint,
-                            size: GLint,
-                            type_: GLenum,
-                            normalized: bool,
-                            stride: GLsizei,
-                            offset: GLuint) {
-        unimplemented!("vertex_attrib_pointer");
+    fn vertex_attrib_pointer(
+        &self,
+        index: GLuint,
+        size: GLint,
+        type_: GLenum,
+        normalized: bool,
+        stride: GLsizei,
+        offset: GLuint,
+    ) {
+        simple!(self.vertex_attrib_pointer(index, size, type_, normalized, stride, offset))
     }
 
-    fn vertex_attrib_i_pointer(&self,
-                            index: GLuint,
-                            size: GLint,
-                            type_: GLenum,
-                            stride: GLsizei,
-                            offset: GLuint) {
-        unimplemented!("vertex_attrib_i_pointer");
+    fn vertex_attrib_i_pointer(
+        &self,
+        index: GLuint,
+        size: GLint,
+        type_: GLenum,
+        stride: GLsizei,
+        offset: GLuint,
+    ) {
+        simple!(self.vertex_attrib_i_pointer(index, size, type_, stride, offset))
     }
 
     fn vertex_attrib_divisor(&self, index: GLuint, divisor: GLuint) {
-        unimplemented!("vertex_attrib_divisor");
+        simple!(self.vertex_attrib_divisor(index, divisor))
     }
 
     fn viewport(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei) {
-        unimplemented!("viewport");
+        simple!(self.viewport(x, y, width, height))
     }
 
     fn scissor(&self, x: GLint, y: GLint, width: GLsizei, height: GLsizei) {
-        unimplemented!("scissor");
+        simple!(self.scissor(x, y, width, height))
     }
 
     fn line_width(&self, width: GLfloat) {
-        unimplemented!("line_width");
+        simple!(self.line_width(width))
     }
 
     fn use_program(&self, program: GLuint) {
@@ -660,28 +792,34 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("draw_arrays");
     }
 
-    fn draw_arrays_instanced(&self,
-                            mode: GLenum,
-                            first: GLint,
-                            count: GLsizei,
-                            primcount: GLsizei) {
+    fn draw_arrays_instanced(
+        &self,
+        mode: GLenum,
+        first: GLint,
+        count: GLsizei,
+        primcount: GLsizei,
+    ) {
         unimplemented!("draw_arrays_instanced");
     }
 
-    fn draw_elements(&self,
-                    mode: GLenum,
-                    count: GLsizei,
-                    element_type: GLenum,
-                    indices_offset: GLuint) {
+    fn draw_elements(
+        &self,
+        mode: GLenum,
+        count: GLsizei,
+        element_type: GLenum,
+        indices_offset: GLuint,
+    ) {
         unimplemented!("draw_elements");
     }
 
-    fn draw_elements_instanced(&self,
-                            mode: GLenum,
-                            count: GLsizei,
-                            element_type: GLenum,
-                            indices_offset: GLuint,
-                            primcount: GLsizei) {
+    fn draw_elements_instanced(
+        &self,
+        mode: GLenum,
+        count: GLsizei,
+        element_type: GLenum,
+        indices_offset: GLuint,
+        primcount: GLsizei,
+    ) {
         unimplemented!("draw_elements_instanced");
     }
 
@@ -693,11 +831,13 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("blend_func");
     }
 
-    fn blend_func_separate(&self,
-                        src_rgb: GLenum,
-                        dest_rgb: GLenum,
-                        src_alpha: GLenum,
-                        dest_alpha: GLenum) {
+    fn blend_func_separate(
+        &self,
+        src_rgb: GLenum,
+        dest_rgb: GLenum,
+        src_alpha: GLenum,
+        dest_alpha: GLenum,
+    ) {
         unimplemented!("blend_func_separate");
     }
 
@@ -758,11 +898,11 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     fn enable_vertex_attrib_array(&self, index: GLuint) {
-        unimplemented!("enable_vertex_attrib_array");
+        simple!(self.enable_vertex_attrib_array(index));
     }
 
     fn disable_vertex_attrib_array(&self, index: GLuint) {
-        unimplemented!("disable_vertex_attrib_array");
+        simple!(self.disable_vertex_attrib_array(index));
     }
 
     fn uniform_1f(&self, location: GLint, v0: GLfloat) {
@@ -873,7 +1013,12 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("get_active_uniform");
     }
 
-    fn get_active_uniforms_iv(&self, program: GLuint, indices: Vec<GLuint>, pname: GLenum) -> Vec<GLint> {
+    fn get_active_uniforms_iv(
+        &self,
+        program: GLuint,
+        indices: Vec<GLuint>,
+        pname: GLenum,
+    ) -> Vec<GLint> {
         unimplemented!("get_active_uniforms_iv");
     }
 
@@ -881,7 +1026,12 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("get_active_uniform_block_i");
     }
 
-    fn get_active_uniform_block_iv(&self, program: GLuint, index: GLuint, pname: GLenum) -> Vec<GLint> {
+    fn get_active_uniform_block_iv(
+        &self,
+        program: GLuint,
+        index: GLuint,
+        pname: GLenum,
+    ) -> Vec<GLint> {
         unimplemented!("get_active_uniform_block_iv");
     }
 
@@ -952,10 +1102,11 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("get_shader_iv");
     }
 
-    fn get_shader_precision_format(&self,
-                                shader_type: GLuint,
-                                precision_type: GLuint)
-                                -> (GLint, GLint, GLint) {
+    fn get_shader_precision_format(
+        &self,
+        shader_type: GLuint,
+        precision_type: GLuint,
+    ) -> (GLint, GLint, GLint) {
         unimplemented!("get_shader_precision_format");
     }
 
@@ -1063,7 +1214,14 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("pop_group_marker_ext");
     }
 
-    fn debug_message_insert_khr(&self, source: GLenum, type_: GLenum, id: GLuint, severity: GLenum, message: &str) {
+    fn debug_message_insert_khr(
+        &self,
+        source: GLenum,
+        type_: GLenum,
+        id: GLuint,
+        severity: GLenum,
+        message: &str,
+    ) {
         unimplemented!("debug_message_insert_khr");
     }
 
@@ -1139,11 +1297,7 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
         unimplemented!("bind_frag_data_location_indexed");
     }
 
-    fn get_frag_data_index(
-        &self,
-        program: GLuint,
-        name: &str,
-    ) -> GLint {
+    fn get_frag_data_index(&self, program: GLuint, name: &str) -> GLint {
         unimplemented!("get_frag_data_index");
     }
 
@@ -1158,19 +1312,39 @@ impl<G, S> gleam::gl::Gl for Recorder<G, S>
     }
 
     // GL_CHROMIUM_copy_texture
-    fn copy_texture_chromium(&self,
-        source_id: GLuint, source_level: GLint,
-        dest_target: GLenum, dest_id: GLuint, dest_level: GLint,
-        internal_format: GLint, dest_type: GLenum,
-        unpack_flip_y: GLboolean, unpack_premultiply_alpha: GLboolean, unpack_unmultiply_alpha: GLboolean) {
+    fn copy_texture_chromium(
+        &self,
+        source_id: GLuint,
+        source_level: GLint,
+        dest_target: GLenum,
+        dest_id: GLuint,
+        dest_level: GLint,
+        internal_format: GLint,
+        dest_type: GLenum,
+        unpack_flip_y: GLboolean,
+        unpack_premultiply_alpha: GLboolean,
+        unpack_unmultiply_alpha: GLboolean,
+    ) {
         unimplemented!("copy_texture_chromium");
     }
 
-    fn copy_sub_texture_chromium(&self,
-        source_id: GLuint, source_level: GLint,
-        dest_target: GLenum, dest_id: GLuint, dest_level: GLint,
-        x_offset: GLint, y_offset: GLint, x: GLint, y: GLint, width: GLsizei, height: GLsizei,
-        unpack_flip_y: GLboolean, unpack_premultiply_alpha: GLboolean, unpack_unmultiply_alpha: GLboolean) {
+    fn copy_sub_texture_chromium(
+        &self,
+        source_id: GLuint,
+        source_level: GLint,
+        dest_target: GLenum,
+        dest_id: GLuint,
+        dest_level: GLint,
+        x_offset: GLint,
+        y_offset: GLint,
+        x: GLint,
+        y: GLint,
+        width: GLsizei,
+        height: GLsizei,
+        unpack_flip_y: GLboolean,
+        unpack_premultiply_alpha: GLboolean,
+        unpack_unmultiply_alpha: GLboolean,
+    ) {
         unimplemented!("copy_sub_texture_chromium");
     }
 
