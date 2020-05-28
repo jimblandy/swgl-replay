@@ -48,6 +48,9 @@ pub trait Serializer {
     /// Write the contents of the buffer `buf`, and return an identifier for it.
     fn write_buffer(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
 
+    /// Write the contents of the buffers `bufs`, and return an identifier for them.
+    fn write_buffers(&mut self, bufs: &[&[u8]]) -> Result<usize, Self::Error>;
+
     /// Flush buffers, if any.
     fn flush(&mut self) -> Result<(), Self::Error>;
 }
@@ -105,19 +108,27 @@ impl<S> Locked<S> {
     fn new(serializer: S) -> Locked<S> {
         Locked { serializer }
     }
+}
 
+impl<S: Serializer> Locked<S> {
     pub(crate) fn write_call(&mut self, call: &call::Call) -> Result<(), S::Error>
-    where
-        S: Serializer,
     {
         self.serializer.write_call(call)
     }
 
     pub(crate) fn write_slice<T: Copy>(&mut self, slice: &[T]) -> Result<usize, S::Error>
-    where
-        S: Serializer,
     {
         self.serializer.write_buffer(raw::slice_as_bytes(slice))
+    }
+
+    pub(crate) fn write_str(&mut self, s: &str) -> Result<usize, S::Error>
+    {
+        self.write_slice(s.as_bytes())
+    }
+
+    pub(crate) fn write_buffers(&mut self, bufs: &[&[u8]]) -> Result<call::BufToGl, S::Error>
+    {
+        Ok(call::BufToGl(self.serializer.write_buffers(bufs)?))
     }
 
     pub(crate) fn write_gl_buffer(
@@ -125,8 +136,6 @@ impl<S> Locked<S> {
         data: *const GLvoid,
         size: GLsizeiptr,
     ) -> Result<call::BufToGl, S::Error>
-    where
-        S: Serializer,
     {
         let scope = ();
         let buf = unsafe { raw::slice_from_gl_buffer(&scope, data, size) };

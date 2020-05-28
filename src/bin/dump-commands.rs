@@ -31,8 +31,12 @@ fn main() -> io::Result<()> {
             eprintln!("bad magic number: {}", dir);
             continue;
         }
-        if header[4] as usize != mem::size_of::<Call>() {
-            eprintln!("size of Call doesn't match: {}", dir);
+        if header[4] as usize != mem::size_of::<usize>() {
+            eprintln!("size of `usize` doesn't match: {}", dir);
+            continue;
+        }
+        if header[5] as usize != mem::size_of::<Call>() {
+            eprintln!("size of `Call` doesn't match: {}", dir);
             continue;
         }
 

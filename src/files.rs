@@ -35,8 +35,8 @@ impl Files {
             b'L',
             b'R',
             b'R',
+            mem::size_of::<usize>() as u8,
             mem::size_of::<call::Call>() as u8,
-            0,
             0,
             0,
         ])?;
@@ -66,6 +66,25 @@ impl Serializer for Files {
 
         self.variable.write_all(raw::as_bytes(&buf.len()))?;
         self.variable.write_all(buf)?;
+        Ok(start_offset)
+    }
+
+    fn write_buffers(&mut self, bufs: &[&[u8]]) -> Result<usize, Self::Error> {
+        let start_offset = self.next_variable_offset;
+
+        // Format: <num bufs> ( <len> <bytes> ) *
+        self.variable.write_all(raw::as_bytes(&bufs.len()))?;
+        let mut len = mem::size_of::<usize>();
+
+        for buf in bufs {
+            self.variable.write_all(raw::as_bytes(&buf.len()))?;
+            self.variable.write_all(buf)?;
+            len += mem::size_of::<usize>() + buf.len();
+        }
+
+        self.next_variable_offset = self.next_variable_offset.checked_add(len)
+            .expect("overflow in gl-replay variable log offset");
+
         Ok(start_offset)
     }
 

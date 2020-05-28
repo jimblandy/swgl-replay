@@ -5,7 +5,7 @@
                    `(ws* . ,(rx (* (char space ?\n))))
                    `(ws+ . ,(rx (+ (char space ?\n))))
                    `(ident . ,(rx (+ (char alnum digit "_"))))
-                   `(type . ,(rx (+ (char alnum digit "_&<>[]"))))
+                   `(type . ,(rx (opt "&mut ") (+ (char alnum digit "_&<>[]"))))
                    `(string . ,(rx ?\" (* (not (any ?\"))) ?\")))))
      (let ((rx-constituents (append add-ins rx-constituents nil)))
        (macroexpand `(rx ,@body-forms)))))
@@ -13,27 +13,30 @@
 (defun jimb-gen-record ()
   (interactive)
   (save-excursion
-    (unless (looking-at (jimb-rx ws* "fn" ws+ (group ident) "(" ws* "&self," ws*))
+    (unless (looking-at (jimb-rx (opt ws* "unsafe") ws* "fn" ws+ (group ident) "(" ws* "&self"))
       (error "not looking at start of function"))
     (let ((fn (match-string-no-properties 1)))
       (goto-char (match-end 0))
       (let (args)
-        (while (looking-at (jimb-rx ws* (group ident) ws* ":" ws* (group type) (opt ws* ",") ws*))
+        (while (looking-at (jimb-rx ws* "," ws* (group ident) ws* ":" ws* (group type) ws*))
           (push (list (match-string-no-properties 1)
                       (match-string-no-properties 2))
                 args)
           (goto-char (match-end 0)))
         (setq args (nreverse args))
-        (unless (looking-at (jimb-rx ws* ")" ws* "{" ws*
-                                     (group "unimplemented!"
-                                            ws* "(" ws* string ws* ")" ws* ";")))
+        (unless (looking-at (jimb-rx (opt ws* ",") ws* ")"
+                                     (opt ws* "->" ws* type)
+                                     ws* "{"
+                                     ws* (group "unimplemented!"
+                                                ws* "(" ws* string ws* ")" ws* ";")))
           (error "Didn't see expected function body"))
         (goto-char (match-beginning 1))
         (delete-region (point) (match-end 1))
         (insert "simple!(self." fn "(")
         (dolist (arg-type args)
           (insert (car arg-type) ", "))
-        (delete-region (- (point) 2) (point))
+        (when args
+          (delete-region (- (point) 2) (point)))
         (insert "))")
 
         (set-buffer "call.rs")
@@ -45,5 +48,7 @@
           (insert "    " fn " { ")
           (dolist (arg-type args)
             (insert (car arg-type) ": " (cadr arg-type) ", "))
-          (delete-region (- (point) 2) (point))
-          (insert " },\n"))))))
+          (when args
+            (delete-region (- (point) 2) (point)))
+          (insert " },\n")
+          (save-buffer))))))

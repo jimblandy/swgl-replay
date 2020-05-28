@@ -65,10 +65,26 @@ macro_rules! gen_things {
             lock locked;
             {
                 // Save the returned vector, so we can check it on replay.
-                let ident = BufFromGl(check!(locked.write_slice(&returned)));
+                let saved_vector = BufFromGl(check!(locked.write_slice(&returned)));
                 check!(locked.write_call(&Call::$method {
                     n: $n,
-                    returned: ident,
+                    returned: saved_vector,
+                }));
+            }
+        }
+    }
+}
+
+macro_rules! get_mut_buffer {
+    ($self:ident . $method:ident ( $( $arg:ident ),* ), buffer $buffer:ident) => {
+        general! {
+            let returned = $self . $method ( $( $arg ),* );
+            lock locked;
+            {
+                // Save the filled buffer, so we can check it on replay.
+                let $buffer = BufFromGl(check!(locked.write_slice(& $buffer)));
+                check!(locked.write_call(&Call::$method {
+                    $( $arg, )*
                 }));
             }
         }
@@ -140,7 +156,17 @@ where
     }
 
     fn shader_source(&self, shader: GLuint, strings: &[&[u8]]) {
-        unimplemented!("shader_source");
+        general! {
+            let returned = self.shader_source(shader, strings);
+            lock locked;
+            {
+                let strings = check!(locked.write_buffers(strings));
+                check!(locked.write_call(&Call::shader_source {
+                    shader,
+                    strings,
+                }));
+            }
+        }
     }
 
     fn read_buffer(&self, mode: GLenum) {
@@ -287,7 +313,7 @@ where
         renderbuffertarget: GLenum,
         renderbuffer: GLuint,
     ) {
-        unimplemented!("framebuffer_renderbuffer");
+        simple!(self.framebuffer_renderbuffer(target, attachment, renderbuffertarget, renderbuffer))
     }
 
     fn renderbuffer_storage(
@@ -297,7 +323,7 @@ where
         width: GLsizei,
         height: GLsizei,
     ) {
-        unimplemented!("renderbuffer_storage");
+        simple!(self.renderbuffer_storage(target, internalformat, width, height))
     }
 
     fn depth_func(&self, func: GLenum) {
@@ -309,11 +335,20 @@ where
     }
 
     fn attach_shader(&self, program: GLuint, shader: GLuint) {
-        unimplemented!("attach_shader");
+        simple!(self.attach_shader(program, shader))
     }
 
     fn bind_attrib_location(&self, program: GLuint, index: GLuint, name: &str) {
-        unimplemented!("bind_attrib_location");
+        general! {
+            let returned = self.bind_attrib_location(program, index, name);
+            lock locked;
+            {
+                let name = BufToGl(check!(locked.write_str(name)));
+                check!(locked.write_call(&Call::bind_attrib_location {
+                    program, index, name
+                }));
+            }
+        }
     }
     unsafe fn get_uniform_iv(&self, program: GLuint, location: GLint, result: &mut [GLint]) {
         unimplemented!("get_uniform_iv");
@@ -363,15 +398,15 @@ where
     }
 
     fn bind_vertex_array_apple(&self, vao: GLuint) {
-        unimplemented!("bind_vertex_array_apple");
+        simple!(self.bind_vertex_array_apple(vao))
     }
 
     fn bind_renderbuffer(&self, target: GLenum, renderbuffer: GLuint) {
-        unimplemented!("bind_renderbuffer");
+        simple!(self.bind_renderbuffer(target, renderbuffer))
     }
 
     fn bind_framebuffer(&self, target: GLenum, framebuffer: GLuint) {
-        unimplemented!("bind_framebuffer");
+        simple!(self.bind_framebuffer(target, framebuffer))
     }
 
     fn bind_texture(&self, target: GLenum, texture: GLuint) {
@@ -394,7 +429,19 @@ where
         ty: GLenum,
         opt_data: Option<&[u8]>,
     ) {
-        unimplemented!("tex_image_2d");
+        general! {
+            let returned = self.tex_image_2d(target, level, internal_format, width, height,
+                                             border, format, ty, opt_data);
+            lock locked;
+            {
+                let opt_data = opt_data.map(|slice| {
+                    BufToGl(check!(locked.write_slice(slice)))
+                });
+                check!(locked.write_call(&Call::tex_image_2d {
+                    target, level, internal_format, width, height, border, format, ty, opt_data
+                }));
+            }
+        }
     }
 
     fn compressed_tex_image_2d(
@@ -522,7 +569,7 @@ where
         ty: GLenum,
         offset: usize,
     ) {
-        unimplemented!("tex_sub_image_2d_pbo");
+        simple!(self.tex_sub_image_2d_pbo(target, level, xoffset, yoffset, width, height, format, ty, offset))
     }
 
     fn tex_sub_image_3d(
@@ -696,7 +743,7 @@ where
         texture: GLuint,
         level: GLint,
     ) {
-        unimplemented!("framebuffer_texture_2d");
+        simple!(self.framebuffer_texture_2d(target, attachment, textarget, texture, level))
     }
 
     fn framebuffer_texture_layer(
@@ -707,7 +754,7 @@ where
         level: GLint,
         layer: GLint,
     ) {
-        unimplemented!("framebuffer_texture_layer");
+        simple!(self.framebuffer_texture_layer(target, attachment, texture, level, layer))
     }
 
     fn blit_framebuffer(
@@ -723,7 +770,7 @@ where
         mask: GLbitfield,
         filter: GLenum,
     ) {
-        unimplemented!("blit_framebuffer");
+        simple!(self.blit_framebuffer(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, mask, filter))
     }
 
     fn vertex_attrib_4f(&self, index: GLuint, x: GLfloat, y: GLfloat, z: GLfloat, w: GLfloat) {
@@ -862,39 +909,39 @@ where
     }
 
     fn enable(&self, cap: GLenum) {
-        unimplemented!("enable");
+        simple!(self.enable(cap))
     }
 
     fn disable(&self, cap: GLenum) {
-        unimplemented!("disable");
+        simple!(self.disable(cap))
     }
 
     fn hint(&self, param_name: GLenum, param_val: GLenum) {
-        unimplemented!("hint");
+        simple!(self.hint(param_name, param_val))
     }
 
     fn is_enabled(&self, cap: GLenum) -> GLboolean {
-        unimplemented!("is_enabled");
+        simple!(self.is_enabled(cap))
     }
 
     fn is_shader(&self, shader: GLuint) -> GLboolean {
-        unimplemented!("is_shader");
+        simple!(self.is_shader(shader))
     }
 
     fn is_texture(&self, texture: GLenum) -> GLboolean {
-        unimplemented!("is_texture");
+        simple!(self.is_texture(texture))
     }
 
     fn is_framebuffer(&self, framebuffer: GLenum) -> GLboolean {
-        unimplemented!("is_framebuffer");
+        simple!(self.is_framebuffer(framebuffer))
     }
 
     fn is_renderbuffer(&self, renderbuffer: GLenum) -> GLboolean {
-        unimplemented!("is_renderbuffer");
+        simple!(self.is_renderbuffer(renderbuffer))
     }
 
     fn check_frame_buffer_status(&self, target: GLenum) -> GLenum {
-        unimplemented!("check_frame_buffer_status");
+        simple!(self.check_frame_buffer_status(target))
     }
 
     fn enable_vertex_attrib_array(&self, index: GLuint) {
@@ -998,7 +1045,7 @@ where
     }
 
     fn depth_mask(&self, flag: bool) {
-        unimplemented!("depth_mask");
+        simple!(self.depth_mask(flag))
     }
 
     fn depth_range(&self, near: f64, far: f64) {
@@ -1087,7 +1134,7 @@ where
     }
 
     fn get_shader_info_log(&self, shader: GLuint) -> String {
-        unimplemented!("get_shader_info_log");
+        no_side_effect!(self.get_shader_info_log(shader))
     }
 
     fn get_string(&self, which: GLenum) -> String {
@@ -1099,7 +1146,7 @@ where
     }
 
     unsafe fn get_shader_iv(&self, shader: GLuint, pname: GLenum, result: &mut [GLint]) {
-        unimplemented!("get_shader_iv");
+        get_mut_buffer!(self.get_shader_iv(shader, pname, result), buffer result)
     }
 
     fn get_shader_precision_format(
@@ -1111,11 +1158,17 @@ where
     }
 
     fn compile_shader(&self, shader: GLuint) {
-        unimplemented!("compile_shader");
+        simple!(self.compile_shader(shader))
     }
 
     fn create_program(&self) -> GLuint {
-        unimplemented!("create_program");
+        general! {
+            let returned = self.create_program();
+            lock locked;
+            {
+                check!(locked.write_call(&Call::create_program { returned }));
+            }
+        }
     }
 
     fn delete_program(&self, program: GLuint) {
@@ -1123,19 +1176,25 @@ where
     }
 
     fn create_shader(&self, shader_type: GLenum) -> GLuint {
-        unimplemented!("create_shader");
+        general! {
+            let returned = self.create_shader(shader_type);
+            lock locked;
+            {
+                check!(locked.write_call(&Call::create_shader { shader_type, returned }));
+            }
+        }
     }
 
     fn delete_shader(&self, shader: GLuint) {
-        unimplemented!("delete_shader");
+        simple!(self.delete_shader(shader))
     }
 
     fn detach_shader(&self, program: GLuint, shader: GLuint) {
-        unimplemented!("detach_shader");
+        simple!(self.detach_shader(program, shader))
     }
 
     fn link_program(&self, program: GLuint) {
-        unimplemented!("link_program");
+        simple!(self.link_program(program))
     }
 
     fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
@@ -1143,23 +1202,23 @@ where
     }
 
     fn clear(&self, buffer_mask: GLbitfield) {
-        unimplemented!("clear");
+        simple!(self.clear(buffer_mask))
     }
 
     fn clear_depth(&self, depth: f64) {
-        unimplemented!("clear_depth");
+        simple!(self.clear_depth(depth))
     }
 
     fn clear_stencil(&self, s: GLint) {
-        unimplemented!("clear_stencil");
+        simple!(self.clear_stencil(s))
     }
 
     fn flush(&self) {
-        unimplemented!("flush");
+        simple!(self.flush())
     }
 
     fn finish(&self) {
-        unimplemented!("finish");
+        simple!(self.finish())
     }
 
     fn get_error(&self) -> GLenum {
