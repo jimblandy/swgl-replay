@@ -4,8 +4,108 @@ use gleam::gl::*;
 use std::ops::Deref;
 use std::os::raw::{c_int, c_void};
 
-use super::{Recorder, Serializer};
+use super::{Locked, Recorder, Serializer};
 use crate::call::{Call, BufFromGl, BufToGl};
+
+/// A `Gl` method parameter type that we can serialize without help.
+///
+/// A `Parameter` type is one that is passed to or returned from `Gl` methods,
+/// and is represented in `Call` variants by the `InCall` type from this trait.
+/// For example:
+///
+/// - `u32` and `f32` parameters are just recorded directly in the `Call`,
+///   so their `InCall` types are simply `u32` and `f32`.
+///
+/// - A `str` parameter gets written to the variable-length data stream, and the
+///   `Call` holds a `BufToGl` value representing its entry there. Thus, `str`'s
+///   associated `InCall` type is `BufToGl`. Its `to_call` implementation writes
+///   out its contents, and returns the `BufToGl`.
+trait Parameter {
+    type InCall;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
+        where S: Serializer;
+    /*
+    fn from_call<D>(in_call: Self::InCall, locked: &mut Locked<D>) -> Result<Self::Owned, D::Error>
+        where S: Deserializer;
+    */
+}
+
+macro_rules! simple_parameter_types {
+    ( $( $type:ty ),* ) => {
+        $(
+            impl Parameter for $type {
+                type InCall = Self;
+                fn to_call<S>(&self, _locked: &mut Locked<S>) -> Result<Self, S::Error>
+                where S: Serializer
+                {
+                    Ok(*self)
+                }
+                /*
+                fn from_call<D>(in_call: Self, &mut Locked<D>) -> Result<Self, D::Error>
+                where D: Deserializer
+                {
+                in_call
+            }
+                 */
+            }
+        )*
+    }
+}
+
+// These types appear as themselves in `Call`. This covers `GLenum`, `GLint`,
+// and all those.
+simple_parameter_types!(bool, u32, i32, f32, f64, usize);
+
+impl Parameter for str {
+    type InCall = BufToGl;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
+    where S: Serializer
+    {
+        locked.write_str(self).map(BufToGl)
+    }
+}
+
+impl<T: Copy> Parameter for Vec<T> {
+    type InCall = BufFromGl;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufFromGl, S::Error>
+    where S: Serializer
+    {
+        locked.write_slice(self).map(BufFromGl)
+    }
+}
+
+impl Parameter for &[u8] {
+    type InCall = BufToGl;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
+    where S: Serializer
+    {
+        locked.write_slice(self).map(BufToGl)
+    }
+}
+
+impl Parameter for &[&[u8]] {
+    type InCall = BufToGl;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
+    where S: Serializer
+    {
+        locked.write_buffers(self)
+    }
+}
+
+impl<T: Parameter> Parameter for Option<T> {
+    type InCall = Option<T::InCall>;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
+    where S: Serializer
+    {
+        self.as_ref().map(|param| param.to_call(locked)).transpose()
+    }
+}
 
 macro_rules! check {
     ($call:expr) => {
@@ -51,24 +151,28 @@ macro_rules! simple {
             let returned = $self . $method ( $( $arg ),* );
             lock locked;
             {
-                locked.write_call(&Call:: $method { $( $arg ),* })
-                    .expect("gl-replay serialization failure");
+                let call = Call:: $method {
+                    $(
+                        $arg : check!($arg .to_call(&mut locked))
+                    ),*
+                };
+
+                check!(locked.write_call(&call));
             }
         }
     }
 }
 
-macro_rules! gen_things {
-    ($self:ident . $method:ident ( $n:ident )) => {
+macro_rules! simple_with_return_value {
+    ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         general! {
-            let returned = $self . $method ( $n );
+            let returned = $self . $method ( $( $arg ),* );
             lock locked;
             {
-                // Save the returned vector, so we can check it on replay.
-                let saved_vector = BufFromGl(check!(locked.write_slice(&returned)));
+                let returned_for_call = check!(returned.to_call(&mut locked));
                 check!(locked.write_call(&Call::$method {
-                    n: $n,
-                    returned: saved_vector,
+                    $( $arg, ),*
+                    returned: returned_for_call
                 }));
             }
         }
@@ -156,17 +260,7 @@ where
     }
 
     fn shader_source(&self, shader: GLuint, strings: &[&[u8]]) {
-        general! {
-            let returned = self.shader_source(shader, strings);
-            lock locked;
-            {
-                let strings = check!(locked.write_buffers(strings));
-                check!(locked.write_call(&Call::shader_source {
-                    shader,
-                    strings,
-                }));
-            }
-        }
+        simple!(self.shader_source(shader, strings))
     }
 
     fn read_buffer(&self, mode: GLenum) {
@@ -223,31 +317,31 @@ where
     }
 
     fn gen_buffers(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_buffers(n))
+        simple_with_return_value!(self.gen_buffers(n))
     }
 
     fn gen_renderbuffers(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_renderbuffers(n))
+        simple_with_return_value!(self.gen_renderbuffers(n))
     }
 
     fn gen_framebuffers(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_framebuffers(n))
+        simple_with_return_value!(self.gen_framebuffers(n))
     }
 
     fn gen_textures(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_textures(n))
+        simple_with_return_value!(self.gen_textures(n))
     }
 
     fn gen_vertex_arrays(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_vertex_arrays(n))
+        simple_with_return_value!(self.gen_vertex_arrays(n))
     }
 
     fn gen_vertex_arrays_apple(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_vertex_arrays_apple(n))
+        simple_with_return_value!(self.gen_vertex_arrays_apple(n))
     }
 
     fn gen_queries(&self, n: GLsizei) -> Vec<GLuint> {
-        gen_things!(self.gen_queries(n))
+        simple_with_return_value!(self.gen_queries(n))
     }
 
     fn begin_query(&self, target: GLenum, id: GLuint) {
@@ -339,17 +433,9 @@ where
     }
 
     fn bind_attrib_location(&self, program: GLuint, index: GLuint, name: &str) {
-        general! {
-            let returned = self.bind_attrib_location(program, index, name);
-            lock locked;
-            {
-                let name = BufToGl(check!(locked.write_str(name)));
-                check!(locked.write_call(&Call::bind_attrib_location {
-                    program, index, name
-                }));
-            }
-        }
+        simple!(self.bind_attrib_location(program, index, name))
     }
+
     unsafe fn get_uniform_iv(&self, program: GLuint, location: GLint, result: &mut [GLint]) {
         unimplemented!("get_uniform_iv");
     }
@@ -429,19 +515,8 @@ where
         ty: GLenum,
         opt_data: Option<&[u8]>,
     ) {
-        general! {
-            let returned = self.tex_image_2d(target, level, internal_format, width, height,
-                                             border, format, ty, opt_data);
-            lock locked;
-            {
-                let opt_data = opt_data.map(|slice| {
-                    BufToGl(check!(locked.write_slice(slice)))
-                });
-                check!(locked.write_call(&Call::tex_image_2d {
-                    target, level, internal_format, width, height, border, format, ty, opt_data
-                }));
-            }
-        }
+        simple!(self.tex_image_2d(target, level, internal_format, width, height,
+                                  border, format, ty, opt_data))
     }
 
     fn compressed_tex_image_2d(
@@ -484,19 +559,8 @@ where
         ty: GLenum,
         opt_data: Option<&[u8]>,
     ) {
-        general! {
-            let returned = self.tex_image_3d(target, level, internal_format, width, height, depth,
-                                             border, format, ty, opt_data);
-            lock locked;
-            {
-                let opt_data = opt_data.map(|slice| {
-                    BufToGl(check!(locked.write_slice(slice)))
-                });
-                check!(locked.write_call(&Call::tex_image_3d {
-                    target, level, internal_format, width, height, depth, border, format, ty, opt_data
-                }));
-            }
-        }
+        simple!(self.tex_image_3d(target, level, internal_format, width, height, depth,
+                                  border, format, ty, opt_data))
     }
 
     fn copy_tex_image_2d(
@@ -586,18 +650,8 @@ where
         ty: GLenum,
         data: &[u8],
     ) {
-        general! {
-            let returned = self.tex_sub_image_3d(target, level, xoffset, yoffset, zoffset, width, height, depth,
-                                  format, ty, data);
-            lock locked;
-            {
-                let data = BufToGl(check!(locked.write_slice(data)));
-                check!(locked.write_call(&Call::tex_sub_image_3d {
-                    target, level, xoffset, yoffset, zoffset, width, height, depth,
-                    format, ty, data
-                }));
-            }
-        }
+        simple!(self.tex_sub_image_3d(target, level, xoffset, yoffset, zoffset, width, height, depth,
+                                      format, ty, data))
     }
 
     fn tex_sub_image_3d_pbo(
@@ -1162,13 +1216,7 @@ where
     }
 
     fn create_program(&self) -> GLuint {
-        general! {
-            let returned = self.create_program();
-            lock locked;
-            {
-                check!(locked.write_call(&Call::create_program { returned }));
-            }
-        }
+        simple_with_return_value!(self.create_program())
     }
 
     fn delete_program(&self, program: GLuint) {
@@ -1176,13 +1224,7 @@ where
     }
 
     fn create_shader(&self, shader_type: GLenum) -> GLuint {
-        general! {
-            let returned = self.create_shader(shader_type);
-            lock locked;
-            {
-                check!(locked.write_call(&Call::create_shader { shader_type, returned }));
-            }
-        }
+        simple_with_return_value!(self.create_shader(shader_type))
     }
 
     fn delete_shader(&self, shader: GLuint) {
