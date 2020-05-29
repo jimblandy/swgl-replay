@@ -57,35 +57,15 @@ impl Serializer for Files {
         Ok(())
     }
 
-    fn write_buffer(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let start_offset = self.next_variable_offset;
-        self.next_variable_offset = self
-            .next_variable_offset
-            .checked_add(mem::size_of::<usize>() + buf.len())
-            .expect("overflow in gl-replay variable log offset");
-
-        self.variable.write_all(raw::as_bytes(&buf.len()))?;
+    fn write_variable(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.variable.write_all(buf)?;
-        Ok(start_offset)
+        self.next_variable_offset += buf.len();
+        Ok(())
     }
 
-    fn write_buffers(&mut self, bufs: &[&[u8]]) -> Result<usize, Self::Error> {
-        let start_offset = self.next_variable_offset;
-
-        // Format: <num bufs> ( <len> <bytes> ) *
-        self.variable.write_all(raw::as_bytes(&bufs.len()))?;
-        let mut len = mem::size_of::<usize>();
-
-        for buf in bufs {
-            self.variable.write_all(raw::as_bytes(&buf.len()))?;
-            self.variable.write_all(buf)?;
-            len += mem::size_of::<usize>() + buf.len();
-        }
-
-        self.next_variable_offset = self.next_variable_offset.checked_add(len)
-            .expect("overflow in gl-replay variable log offset");
-
-        Ok(start_offset)
+    /// Return an identifier for the next value written with `write_variable`.
+    fn next_variable_id(&self) -> usize {
+        self.next_variable_offset
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {

@@ -4,8 +4,8 @@ use gleam::gl::*;
 use std::ops::Deref;
 use std::os::raw::{c_int, c_void};
 
-use super::{Locked, Recorder, Serializer};
-use crate::call::{Call, BufFromGl, BufToGl};
+use super::{Locked, Recorder, Serialize, Serializer};
+use crate::call::{Call, BufFromGl, BufToGl, GlRawBuf};
 
 /// A `Gl` method parameter type that we can serialize without help.
 ///
@@ -25,10 +25,6 @@ trait Parameter {
 
     fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
         where S: Serializer;
-    /*
-    fn from_call<D>(in_call: Self::InCall, locked: &mut Locked<D>) -> Result<Self::Owned, D::Error>
-        where S: Deserializer;
-    */
 }
 
 macro_rules! simple_parameter_types {
@@ -41,20 +37,13 @@ macro_rules! simple_parameter_types {
                 {
                     Ok(*self)
                 }
-                /*
-                fn from_call<D>(in_call: Self, &mut Locked<D>) -> Result<Self, D::Error>
-                where D: Deserializer
-                {
-                in_call
-            }
-                 */
             }
         )*
     }
 }
 
 // These types appear as themselves in `Call`. This covers `GLenum`, `GLint`,
-// and all those.
+// and friends.
 simple_parameter_types!(bool, u32, i32, f32, f64, usize);
 
 impl Parameter for str {
@@ -63,37 +52,47 @@ impl Parameter for str {
     fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
     where S: Serializer
     {
-        locked.write_str(self).map(BufToGl)
+        locked.write_variable(self).map(BufToGl)
     }
 }
 
-impl<T: Copy> Parameter for Vec<T> {
+impl<T: Serialize> Parameter for Vec<T> {
     type InCall = BufFromGl;
 
     fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufFromGl, S::Error>
     where S: Serializer
     {
-        locked.write_slice(self).map(BufFromGl)
+        locked.write_variable(&self[..]).map(BufFromGl)
     }
 }
 
-impl Parameter for &[u8] {
+impl<T: Serialize> Parameter for [T] {
     type InCall = BufToGl;
 
     fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
     where S: Serializer
     {
-        locked.write_slice(self).map(BufToGl)
+        locked.write_variable(self).map(BufToGl)
     }
 }
 
-impl Parameter for &[&[u8]] {
+impl<T: Serialize + ?Sized> Parameter for &T {
     type InCall = BufToGl;
 
     fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
     where S: Serializer
     {
-        locked.write_buffers(self)
+        locked.write_variable(self).map(BufToGl)
+    }
+}
+
+impl<T: Serialize + ?Sized> Parameter for &mut T {
+    type InCall = BufFromGl;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufFromGl, S::Error>
+    where S: Serializer
+    {
+        locked.write_variable(&**self).map(BufFromGl)
     }
 }
 
@@ -104,6 +103,16 @@ impl<T: Parameter> Parameter for Option<T> {
     where S: Serializer
     {
         self.as_ref().map(|param| param.to_call(locked)).transpose()
+    }
+}
+
+impl Parameter for GlRawBuf {
+    type InCall = BufToGl;
+
+    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
+    where S: Serializer
+    {
+        locked.write_variable(self.as_slice()).map(BufToGl)
     }
 }
 
@@ -179,22 +188,6 @@ macro_rules! simple_with_return_value {
     }
 }
 
-macro_rules! get_mut_buffer {
-    ($self:ident . $method:ident ( $( $arg:ident ),* ), buffer $buffer:ident) => {
-        general! {
-            let returned = $self . $method ( $( $arg ),* );
-            lock locked;
-            {
-                // Save the filled buffer, so we can check it on replay.
-                let $buffer = BufFromGl(check!(locked.write_slice(& $buffer)));
-                check!(locked.write_call(&Call::$method {
-                    $( $arg, )*
-                }));
-            }
-        }
-    }
-}
-
 #[allow(unused_variables)]
 impl<G, S> gleam::gl::Gl for Recorder<G, S>
 where
@@ -217,12 +210,13 @@ where
             let returned = self.buffer_data_untyped(target, size, data, usage);
             lock locked;
             {
-                let size_data = check!(locked.write_gl_buffer(data, size));
-                check!(locked.write_call(&Call::buffer_data_untyped {
+                let size_data = unsafe { GlRawBuf::new_unchecked(data, size) };
+                let call = Call::buffer_data_untyped {
                     target,
-                    size_data,
-                    usage
-                }));
+                    size_data: check!(size_data.to_call(&mut locked)),
+                    usage,
+                };
+                check!(locked.write_call(&call));
             }
         }
     }
@@ -1200,7 +1194,7 @@ where
     }
 
     unsafe fn get_shader_iv(&self, shader: GLuint, pname: GLenum, result: &mut [GLint]) {
-        get_mut_buffer!(self.get_shader_iv(shader, pname, result), buffer result)
+        simple!(self.get_shader_iv(shader, pname, result))
     }
 
     fn get_shader_precision_format(

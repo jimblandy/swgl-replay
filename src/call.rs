@@ -4,6 +4,29 @@
 
 use gleam::gl::{GLbitfield, GLenum, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid};
 
+/// An untyped memory buffer, passed as a `data`/`size` pair to some methods.
+pub struct GlRawBuf {
+    data: *const GLvoid,
+    size: GLsizeiptr,
+}
+
+impl GlRawBuf {
+    /// Create a new GlRawBuf.
+    ///
+    /// Safety: `data` must actually point to `size` bytes, for as long as the
+    /// `GlRawBuf` exists.
+    pub unsafe fn new_unchecked(data: *const GLvoid, size: GLsizeiptr) -> GlRawBuf {
+        GlRawBuf { data, size }
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        // Safe because of contract on GlRawBuf::new.
+        unsafe {
+            std::slice::from_raw_parts(self.data as *const u8, self.size as usize)
+        }
+    }
+}
+
 /// An identifier for a memory buffer passing data to GL.
 ///
 /// An argument of this type indicates that this call only reads data from the

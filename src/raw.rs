@@ -1,7 +1,5 @@
 //! Utilities for raw pointer and slice handling.
 
-use gleam::gl::{GLsizeiptr, GLvoid};
-
 /// Given a reference, return a byte slice of the value's representation.
 pub fn as_bytes<T: Copy>(r: &T) -> &[u8] {
     unsafe {
@@ -16,8 +14,4 @@ pub fn slice_as_bytes<T: Copy>(r: &[T]) -> &[u8] {
         std::slice::from_raw_parts(r.as_ptr() as *const u8,
                                    std::mem::size_of_val(r))
     }
-}
-
-pub unsafe fn slice_from_gl_buffer<T>(_lifetime: &T, data: *const GLvoid, size: GLsizeiptr) -> &[u8] {
-    std::slice::from_raw_parts(data as *const u8, size as usize)
 }
