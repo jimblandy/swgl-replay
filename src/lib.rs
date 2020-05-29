@@ -34,10 +34,12 @@ mod call;
 mod files;
 mod raw;
 mod recorder_impl;
+mod replay;
 mod serialize;
 
 pub use call::{BufFromGl, BufToGl, Call};
 pub use files::Files;
+pub use replay::replay;
 pub use serialize::{Serialize, Serializer};
 
 pub struct Recorder<G, S> {

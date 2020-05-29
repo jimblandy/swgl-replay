@@ -20,7 +20,7 @@ pub trait Serializer {
 
 /// A type that can be serialized to a Serializer.
 pub trait Serialize {
-    /// Serialize a a single `Self` value.
+    /// Serialize a single `Self` value.
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error>;
 
     /// Serialize a `[Self]` slice. This can be overridden by implementations for types
@@ -35,6 +35,18 @@ pub trait Serialize {
         }
         Ok(())
     }
+}
+
+pub struct EndOfDataError;
+
+/// A type that can be deserialized from a block of bytes.
+pub trait Deserialize {
+    /// Deserialize a `Self` from `buf`.
+    ///
+    /// adjust `buf` to refer to the following data.
+    fn read(buf: &mut &[u8]) -> Result<Self, EndOfDataError>
+    where
+        Self: Sized;
 }
 
 macro_rules! simply_serialized_types {
