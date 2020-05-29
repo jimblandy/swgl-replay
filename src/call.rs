@@ -112,4 +112,7 @@ pub enum Call {
     clear { buffer_mask: GLbitfield },
     clear_depth { depth: f64 },
     clear_stencil { s: GLint },
+    get_attrib_location { program: GLuint, name: BufToGl },
+    get_frag_data_location { program: GLuint, name: BufToGl },
+    get_uniform_location { program: GLuint, name: BufToGl },
 }

@@ -1135,15 +1135,15 @@ where
     }
 
     fn get_attrib_location(&self, program: GLuint, name: &str) -> c_int {
-        unimplemented!("get_attrib_location");
+        simple!(self.get_attrib_location(program, name))
     }
 
     fn get_frag_data_location(&self, program: GLuint, name: &str) -> c_int {
-        unimplemented!("get_frag_data_location");
+        simple!(self.get_frag_data_location(program, name))
     }
 
     fn get_uniform_location(&self, program: GLuint, name: &str) -> c_int {
-        unimplemented!("get_uniform_location");
+        simple!(self.get_uniform_location(program, name))
     }
 
     fn get_program_info_log(&self, program: GLuint) -> String {
