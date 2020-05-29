@@ -173,4 +173,10 @@ pub enum Call {
     delete_framebuffers { framebuffers: BufToGl },
     delete_textures { textures: BufToGl },
     delete_program { program: GLuint },
+    tex_sub_image_3d_pbo { target: GLenum, level: GLint, xoffset: GLint, yoffset: GLint, zoffset: GLint, width: GLsizei, height: GLsizei, depth: GLsizei, format: GLenum, ty: GLenum, offset: usize },
+    tex_storage_2d { target: GLenum, levels: GLint, internal_format: GLenum, width: GLsizei, height: GLsizei },
+    tex_storage_3d { target: GLenum, levels: GLint, internal_format: GLenum, width: GLsizei, height: GLsizei, depth: GLsizei },
+    get_tex_image_into_buffer { target: GLenum, level: GLint, format: GLenum, ty: GLenum, output: BufFromGl },
+    copy_image_sub_data { src_name: GLuint, src_target: GLenum, src_level: GLint, src_x: GLint, src_y: GLint, src_z: GLint, dst_name: GLuint, dst_target: GLenum, dst_level: GLint, dst_x: GLint, dst_y: GLint, dst_z: GLint, src_width: GLsizei, src_height: GLsizei, src_depth: GLsizei },
+    generate_mipmap { target: GLenum },
 }

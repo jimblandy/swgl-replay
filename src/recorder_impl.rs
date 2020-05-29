@@ -696,7 +696,9 @@ where
         ty: GLenum,
         offset: usize,
     ) {
-        unimplemented!("tex_sub_image_3d_pbo");
+        simple!(self.tex_sub_image_3d_pbo(
+            target, level, xoffset, yoffset, zoffset, width, height, depth, format, ty, offset
+        ))
     }
 
     fn tex_storage_2d(
@@ -707,7 +709,7 @@ where
         width: GLsizei,
         height: GLsizei,
     ) {
-        unimplemented!("tex_storage_2d");
+        simple!(self.tex_storage_2d(target, levels, internal_format, width, height))
     }
 
     fn tex_storage_3d(
@@ -719,7 +721,7 @@ where
         height: GLsizei,
         depth: GLsizei,
     ) {
-        unimplemented!("tex_storage_3d");
+        simple!(self.tex_storage_3d(target, levels, internal_format, width, height, depth))
     }
 
     fn get_tex_image_into_buffer(
@@ -730,8 +732,9 @@ where
         ty: GLenum,
         output: &mut [u8],
     ) {
-        unimplemented!("get_tex_image_into_buffer");
+        simple!(self.get_tex_image_into_buffer(target, level, format, ty, output))
     }
+
     unsafe fn copy_image_sub_data(
         &self,
         src_name: GLuint,
@@ -750,7 +753,10 @@ where
         src_height: GLsizei,
         src_depth: GLsizei,
     ) {
-        unimplemented!("copy_image_sub_data");
+        simple!(self.copy_image_sub_data(
+            src_name, src_target, src_level, src_x, src_y, src_z, dst_name, dst_target, dst_level,
+            dst_x, dst_y, dst_z, src_width, src_height, src_depth
+        ))
     }
 
     fn invalidate_framebuffer(&self, target: GLenum, attachments: &[GLenum]) {
@@ -1337,7 +1343,7 @@ where
     }
 
     fn generate_mipmap(&self, target: GLenum) {
-        unimplemented!("generate_mipmap");
+        simple!(self.generate_mipmap(target))
     }
 
     fn insert_event_marker_ext(&self, message: &str) {
