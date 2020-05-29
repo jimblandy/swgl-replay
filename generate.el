@@ -47,8 +47,16 @@
           (forward-line 0)
           (insert "    " fn " { ")
           (dolist (arg-type args)
-            (insert (car arg-type) ": " (cadr arg-type) ", "))
+            (insert (car arg-type) ": " (jimb-fixup-call-type (cadr arg-type))
+                    ", "))
           (when args
             (delete-region (- (point) 2) (point)))
           (insert " },\n")
           (save-buffer))))))
+
+(defun jimb-fixup-call-type (type)
+  (cond
+   ((string-match (jimb-rx bos ident eos) type) type)
+   ((string-match (jimb-rx bos "&" ws* "[") type) "BufToGl")
+   ((string-match (jimb-rx bos "&" ws* "mut" ws* "[") type) "BufFromGl")
+   ((string-match (jimb-rx bos "Vec" ws* "<" (* (not (any ">"))) ">" eot) type) "BufToGl")))

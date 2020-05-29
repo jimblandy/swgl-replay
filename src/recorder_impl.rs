@@ -44,7 +44,7 @@ macro_rules! simple_parameter_types {
 
 // These types appear as themselves in `Call`. This covers `GLenum`, `GLint`,
 // and friends.
-simple_parameter_types!(bool, u32, i32, f32, f64, usize);
+simple_parameter_types!(bool, u32, i32, u64, i64, f32, f64, usize);
 
 impl Parameter for str {
     type InCall = BufToGl;
@@ -180,7 +180,7 @@ macro_rules! simple_with_return_value {
             {
                 let returned_for_call = check!(returned.to_call(&mut locked));
                 check!(locked.write_call(&Call::$method {
-                    $( $arg, ),*
+                    $( $arg, )*
                     returned: returned_for_call
                 }));
             }
@@ -196,7 +196,7 @@ where
     S: Serializer,
 {
     fn get_type(&self) -> GlType {
-        self.inner_gl.get_type()
+        no_side_effect!(self.get_type())
     }
 
     fn buffer_data_untyped(
@@ -258,7 +258,7 @@ where
     }
 
     fn read_buffer(&self, mode: GLenum) {
-        unimplemented!("read_buffer");
+        simple!(self.read_buffer(mode))
     }
 
     fn read_pixels_into_buffer(
@@ -271,7 +271,7 @@ where
         pixel_type: GLenum,
         dst_buffer: &mut [u8],
     ) {
-        unimplemented!("read_pixels_into_buffer");
+        no_side_effect!(self.read_pixels_into_buffer(x, y, width, height, format, pixel_type, dst_buffer))
     }
 
     fn read_pixels(
@@ -283,7 +283,7 @@ where
         format: GLenum,
         pixel_type: GLenum,
     ) -> Vec<u8> {
-        unimplemented!("read_pixels");
+        no_side_effect!(self.read_pixels(x, y, width, height, format, pixel_type))
     }
 
     unsafe fn read_pixels_into_pbo(
@@ -295,15 +295,15 @@ where
         format: GLenum,
         pixel_type: GLenum,
     ) {
-        unimplemented!("read_pixels_into_pbo");
+        simple!(self.read_pixels_into_pbo(x, y, width, height, format, pixel_type))
     }
 
     fn sample_coverage(&self, value: GLclampf, invert: bool) {
-        unimplemented!("sample_coverage");
+        simple!(self.sample_coverage(value, invert))
     }
 
     fn polygon_offset(&self, factor: GLfloat, units: GLfloat) {
-        unimplemented!("polygon_offset");
+        simple!(self.polygon_offset(factor, units))
     }
 
     fn pixel_store_i(&self, name: GLenum, param: GLint) {
@@ -339,59 +339,59 @@ where
     }
 
     fn begin_query(&self, target: GLenum, id: GLuint) {
-        unimplemented!("begin_query");
+        simple!(self.begin_query(target, id))
     }
 
     fn end_query(&self, target: GLenum) {
-        unimplemented!("end_query");
+        simple!(self.end_query(target))
     }
 
     fn query_counter(&self, id: GLuint, target: GLenum) {
-        unimplemented!("query_counter");
+        simple!(self.query_counter(id, target))
     }
 
     fn get_query_object_iv(&self, id: GLuint, pname: GLenum) -> i32 {
-        unimplemented!("get_query_object_iv");
+        simple_with_return_value!(self.get_query_object_iv(id, pname))
     }
 
     fn get_query_object_uiv(&self, id: GLuint, pname: GLenum) -> u32 {
-        unimplemented!("get_query_object_uiv");
+        simple_with_return_value!(self.get_query_object_uiv(id, pname))
     }
 
     fn get_query_object_i64v(&self, id: GLuint, pname: GLenum) -> i64 {
-        unimplemented!("get_query_object_i64v");
+        simple_with_return_value!(self.get_query_object_i64v(id, pname))
     }
 
     fn get_query_object_ui64v(&self, id: GLuint, pname: GLenum) -> u64 {
-        unimplemented!("get_query_object_ui64v");
+        simple_with_return_value!(self.get_query_object_ui64v(id, pname))
     }
 
     fn delete_queries(&self, queries: &[GLuint]) {
-        unimplemented!("delete_queries");
+        simple!(self.delete_queries(queries))
     }
 
     fn delete_vertex_arrays(&self, vertex_arrays: &[GLuint]) {
-        unimplemented!("delete_vertex_arrays");
+        simple!(self.delete_vertex_arrays(vertex_arrays))
     }
 
     fn delete_vertex_arrays_apple(&self, vertex_arrays: &[GLuint]) {
-        unimplemented!("delete_vertex_arrays_apple");
+        simple!(self.delete_vertex_arrays_apple(vertex_arrays))
     }
 
     fn delete_buffers(&self, buffers: &[GLuint]) {
-        unimplemented!("delete_buffers");
+        simple!(self.delete_buffers(buffers))
     }
 
     fn delete_renderbuffers(&self, renderbuffers: &[GLuint]) {
-        unimplemented!("delete_renderbuffers");
+        simple!(self.delete_renderbuffers(renderbuffers))
     }
 
     fn delete_framebuffers(&self, framebuffers: &[GLuint]) {
-        unimplemented!("delete_framebuffers");
+        simple!(self.delete_framebuffers(framebuffers))
     }
 
     fn delete_textures(&self, textures: &[GLuint]) {
-        unimplemented!("delete_textures");
+        simple!(self.delete_textures(textures))
     }
 
     fn framebuffer_renderbuffer(
@@ -415,7 +415,7 @@ where
     }
 
     fn depth_func(&self, func: GLenum) {
-        unimplemented!("depth_func");
+        simple!(self.depth_func(func))
     }
 
     fn active_texture(&self, texture: GLenum) {
@@ -720,7 +720,7 @@ where
     }
 
     fn invalidate_framebuffer(&self, target: GLenum, attachments: &[GLenum]) {
-        unimplemented!("invalidate_framebuffer");
+        simple!(self.invalidate_framebuffer(target, attachments))
     }
 
     fn invalidate_sub_framebuffer(
@@ -732,7 +732,7 @@ where
         width: GLsizei,
         height: GLsizei,
     ) {
-        unimplemented!("invalidate_sub_framebuffer");
+        simple!(self.invalidate_sub_framebuffer(target, attachments, xoffset, yoffset, width, height))
     }
 
     unsafe fn get_integer_v(&self, name: GLenum, result: &mut [GLint]) {
@@ -915,15 +915,15 @@ where
         indices_offset: GLuint,
         primcount: GLsizei,
     ) {
-        unimplemented!("draw_elements_instanced");
+        simple!(self.draw_elements_instanced(mode, count, element_type, indices_offset, primcount))
     }
 
     fn blend_color(&self, r: f32, g: f32, b: f32, a: f32) {
-        unimplemented!("blend_color");
+        simple!(self.blend_color(r, g, b, a))
     }
 
     fn blend_func(&self, sfactor: GLenum, dfactor: GLenum) {
-        unimplemented!("blend_func");
+        simple!(self.blend_func(sfactor, dfactor))
     }
 
     fn blend_func_separate(
@@ -933,27 +933,27 @@ where
         src_alpha: GLenum,
         dest_alpha: GLenum,
     ) {
-        unimplemented!("blend_func_separate");
+        simple!(self.blend_func_separate(src_rgb, dest_rgb, src_alpha, dest_alpha))
     }
 
     fn blend_equation(&self, mode: GLenum) {
-        unimplemented!("blend_equation");
+        simple!(self.blend_equation(mode))
     }
 
     fn blend_equation_separate(&self, mode_rgb: GLenum, mode_alpha: GLenum) {
-        unimplemented!("blend_equation_separate");
+        simple!(self.blend_equation_separate(mode_rgb, mode_alpha))
     }
 
     fn color_mask(&self, r: bool, g: bool, b: bool, a: bool) {
-        unimplemented!("color_mask");
+        simple!(self.color_mask(r, g, b, a))
     }
 
     fn cull_face(&self, mode: GLenum) {
-        unimplemented!("cull_face");
+        simple!(self.cull_face(mode))
     }
 
     fn front_face(&self, mode: GLenum) {
-        unimplemented!("front_face");
+        simple!(self.front_face(mode))
     }
 
     fn enable(&self, cap: GLenum) {
@@ -1001,95 +1001,95 @@ where
     }
 
     fn uniform_1f(&self, location: GLint, v0: GLfloat) {
-        unimplemented!("uniform_1f");
+        simple!(self.uniform_1f(location, v0))
     }
 
     fn uniform_1fv(&self, location: GLint, values: &[f32]) {
-        unimplemented!("uniform_1fv");
+        simple!(self.uniform_1fv(location, values))
     }
 
     fn uniform_1i(&self, location: GLint, v0: GLint) {
-        unimplemented!("uniform_1i");
+        simple!(self.uniform_1i(location, v0))
     }
 
     fn uniform_1iv(&self, location: GLint, values: &[i32]) {
-        unimplemented!("uniform_1iv");
+        simple!(self.uniform_1iv(location, values))
     }
 
     fn uniform_1ui(&self, location: GLint, v0: GLuint) {
-        unimplemented!("uniform_1ui");
+        simple!(self.uniform_1ui(location, v0))
     }
 
     fn uniform_2f(&self, location: GLint, v0: GLfloat, v1: GLfloat) {
-        unimplemented!("uniform_2f");
+        simple!(self.uniform_2f(location, v0, v1))
     }
 
     fn uniform_2fv(&self, location: GLint, values: &[f32]) {
-        unimplemented!("uniform_2fv");
+        simple!(self.uniform_2fv(location, values))
     }
 
     fn uniform_2i(&self, location: GLint, v0: GLint, v1: GLint) {
-        unimplemented!("uniform_2i");
+        simple!(self.uniform_2i(location, v0, v1))
     }
 
     fn uniform_2iv(&self, location: GLint, values: &[i32]) {
-        unimplemented!("uniform_2iv");
+        simple!(self.uniform_2iv(location, values))
     }
 
     fn uniform_2ui(&self, location: GLint, v0: GLuint, v1: GLuint) {
-        unimplemented!("uniform_2ui");
+        simple!(self.uniform_2ui(location, v0, v1))
     }
 
     fn uniform_3f(&self, location: GLint, v0: GLfloat, v1: GLfloat, v2: GLfloat) {
-        unimplemented!("uniform_3f");
+        simple!(self.uniform_3f(location, v0, v1, v2))
     }
 
     fn uniform_3fv(&self, location: GLint, values: &[f32]) {
-        unimplemented!("uniform_3fv");
+        simple!(self.uniform_3fv(location, values))
     }
 
     fn uniform_3i(&self, location: GLint, v0: GLint, v1: GLint, v2: GLint) {
-        unimplemented!("uniform_3i");
+        simple!(self.uniform_3i(location, v0, v1, v2))
     }
 
     fn uniform_3iv(&self, location: GLint, values: &[i32]) {
-        unimplemented!("uniform_3iv");
+        simple!(self.uniform_3iv(location, values))
     }
 
     fn uniform_3ui(&self, location: GLint, v0: GLuint, v1: GLuint, v2: GLuint) {
-        unimplemented!("uniform_3ui");
+        simple!(self.uniform_3ui(location, v0, v1, v2))
     }
 
     fn uniform_4f(&self, location: GLint, x: GLfloat, y: GLfloat, z: GLfloat, w: GLfloat) {
-        unimplemented!("uniform_4f");
+        simple!(self.uniform_4f(location, x, y, z, w))
     }
 
     fn uniform_4i(&self, location: GLint, x: GLint, y: GLint, z: GLint, w: GLint) {
-        unimplemented!("uniform_4i");
+        simple!(self.uniform_4i(location, x, y, z, w))
     }
 
     fn uniform_4iv(&self, location: GLint, values: &[i32]) {
-        unimplemented!("uniform_4iv");
+        simple!(self.uniform_4iv(location, values))
     }
 
     fn uniform_4ui(&self, location: GLint, x: GLuint, y: GLuint, z: GLuint, w: GLuint) {
-        unimplemented!("uniform_4ui");
+        simple!(self.uniform_4ui(location, x, y, z, w))
     }
 
     fn uniform_4fv(&self, location: GLint, values: &[f32]) {
-        unimplemented!("uniform_4fv");
+        simple!(self.uniform_4fv(location, values))
     }
 
     fn uniform_matrix_2fv(&self, location: GLint, transpose: bool, value: &[f32]) {
-        unimplemented!("uniform_matrix_2fv");
+        simple!(self.uniform_matrix_2fv(location, transpose, value))
     }
 
     fn uniform_matrix_3fv(&self, location: GLint, transpose: bool, value: &[f32]) {
-        unimplemented!("uniform_matrix_3fv");
+        simple!(self.uniform_matrix_3fv(location, transpose, value))
     }
 
     fn uniform_matrix_4fv(&self, location: GLint, transpose: bool, value: &[f32]) {
-        unimplemented!("uniform_matrix_4fv");
+        simple!(self.uniform_matrix_4fv(location, transpose, value))
     }
 
     fn depth_mask(&self, flag: bool) {
@@ -1097,7 +1097,7 @@ where
     }
 
     fn depth_range(&self, near: f64, far: f64) {
-        unimplemented!("depth_range");
+        simple!(self.depth_range(near, far))
     }
 
     fn get_active_attrib(&self, program: GLuint, index: GLuint) -> (i32, u32, String) {
@@ -1150,7 +1150,7 @@ where
         unimplemented!("get_program_info_log");
     }
     unsafe fn get_program_iv(&self, program: GLuint, pname: GLenum, result: &mut [GLint]) {
-        unimplemented!("get_program_iv");
+        simple!(self.get_program_iv(program, pname, result))
     }
 
     fn get_program_binary(&self, program: GLuint) -> (Vec<u8>, GLenum) {
@@ -1214,7 +1214,7 @@ where
     }
 
     fn delete_program(&self, program: GLuint) {
-        unimplemented!("delete_program");
+        simple!(self.delete_program(program))
     }
 
     fn create_shader(&self, shader_type: GLenum) -> GLuint {
