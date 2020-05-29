@@ -4,8 +4,8 @@ use gleam::gl::*;
 use std::ops::Deref;
 use std::os::raw::{c_int, c_void};
 
-use super::{Locked, Recorder, Serialize, Serializer};
-use crate::call::{Call, BufFromGl, BufToGl, GlRawBuf};
+use super::{InnerRecorder, Recorder, Serialize, Serializer};
+use crate::call::{BufFromGl, BufToGl, Call, GlRawBuf};
 
 /// A `Gl` method parameter type that we can serialize without help.
 ///
@@ -23,8 +23,9 @@ use crate::call::{Call, BufFromGl, BufToGl, GlRawBuf};
 trait Parameter {
     type InCall;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
-        where S: Serializer;
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::InCall, S::Error>
+    where
+        S: Serializer;
 }
 
 macro_rules! simple_parameter_types {
@@ -32,7 +33,7 @@ macro_rules! simple_parameter_types {
         $(
             impl Parameter for $type {
                 type InCall = Self;
-                fn to_call<S>(&self, _locked: &mut Locked<S>) -> Result<Self, S::Error>
+                fn to_call<S>(&self, _inner_recorder: &mut InnerRecorder<S>) -> Result<Self, S::Error>
                 where S: Serializer
                 {
                     Ok(*self)
@@ -49,70 +50,79 @@ simple_parameter_types!(bool, u32, i32, u64, i64, f32, f64, usize);
 impl Parameter for str {
     type InCall = BufToGl;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufToGl, S::Error>
+    where
+        S: Serializer,
     {
-        locked.write_variable(self).map(BufToGl)
+        inner_recorder.write_variable(self).map(BufToGl)
     }
 }
 
 impl<T: Serialize> Parameter for Vec<T> {
     type InCall = BufFromGl;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufFromGl, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufFromGl, S::Error>
+    where
+        S: Serializer,
     {
-        locked.write_variable(&self[..]).map(BufFromGl)
+        inner_recorder.write_variable(&self[..]).map(BufFromGl)
     }
 }
 
 impl<T: Serialize> Parameter for [T] {
     type InCall = BufToGl;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufToGl, S::Error>
+    where
+        S: Serializer,
     {
-        locked.write_variable(self).map(BufToGl)
+        inner_recorder.write_variable(self).map(BufToGl)
     }
 }
 
 impl<T: Serialize + ?Sized> Parameter for &T {
     type InCall = BufToGl;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufToGl, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufToGl, S::Error>
+    where
+        S: Serializer,
     {
-        locked.write_variable(self).map(BufToGl)
+        inner_recorder.write_variable(self).map(BufToGl)
     }
 }
 
 impl<T: Serialize + ?Sized> Parameter for &mut T {
     type InCall = BufFromGl;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<BufFromGl, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufFromGl, S::Error>
+    where
+        S: Serializer,
     {
-        locked.write_variable(&**self).map(BufFromGl)
+        inner_recorder.write_variable(&**self).map(BufFromGl)
     }
 }
 
 impl<T: Parameter> Parameter for Option<T> {
     type InCall = Option<T::InCall>;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::InCall, S::Error>
+    where
+        S: Serializer,
     {
-        self.as_ref().map(|param| param.to_call(locked)).transpose()
+        self.as_ref()
+            .map(|param| param.to_call(inner_recorder))
+            .transpose()
     }
 }
 
 impl Parameter for GlRawBuf {
     type InCall = BufToGl;
 
-    fn to_call<S>(&self, locked: &mut Locked<S>) -> Result<Self::InCall, S::Error>
-    where S: Serializer
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::InCall, S::Error>
+    where
+        S: Serializer,
     {
-        locked.write_variable(self.as_slice()).map(BufToGl)
+        inner_recorder.write_variable(self.as_slice()).map(BufToGl)
     }
 }
 
@@ -136,17 +146,17 @@ macro_rules! no_side_effect {
 macro_rules! general {
     (
         let $returned:ident = $self:ident . $method:ident ( $( $arg:ident ),* );
-        lock $locked:ident;
+        lock $inner_recorder:ident;
         $body:expr
     ) => {
         {
             let $returned = $self .inner_gl. $method ( $( $arg ),* );
-            let mut $locked = $self .locked.lock().unwrap();
+            let mut $inner_recorder = $self .inner_recorder.lock().unwrap();
 
             $body;
 
             // For debugging.
-            $locked .serializer.flush()
+            $inner_recorder .serializer.flush()
                 .expect("gl-replay serialization failure");
 
             $returned
@@ -158,15 +168,15 @@ macro_rules! simple {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         general! {
             let returned = $self . $method ( $( $arg ),* );
-            lock locked;
+            lock inner_recorder;
             {
                 let call = Call:: $method {
                     $(
-                        $arg : check!($arg .to_call(&mut locked))
+                        $arg : check!($arg .to_call(&mut inner_recorder))
                     ),*
                 };
 
-                check!(locked.write_call(&call));
+                check!(inner_recorder.write_call(&call));
             }
         }
     }
@@ -176,10 +186,10 @@ macro_rules! simple_with_return_value {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         general! {
             let returned = $self . $method ( $( $arg ),* );
-            lock locked;
+            lock inner_recorder;
             {
-                let returned_for_call = check!(returned.to_call(&mut locked));
-                check!(locked.write_call(&Call::$method {
+                let returned_for_call = check!(returned.to_call(&mut inner_recorder));
+                check!(inner_recorder.write_call(&Call::$method {
                     $( $arg, )*
                     returned: returned_for_call
                 }));
@@ -208,15 +218,15 @@ where
     ) {
         general! {
             let returned = self.buffer_data_untyped(target, size, data, usage);
-            lock locked;
+            lock inner_recorder;
             {
                 let size_data = unsafe { GlRawBuf::new_unchecked(data, size) };
                 let call = Call::buffer_data_untyped {
                     target,
-                    size_data: check!(size_data.to_call(&mut locked)),
+                    size_data: check!(size_data.to_call(&mut inner_recorder)),
                     usage,
                 };
-                check!(locked.write_call(&call));
+                check!(inner_recorder.write_call(&call));
             }
         }
     }
@@ -271,7 +281,9 @@ where
         pixel_type: GLenum,
         dst_buffer: &mut [u8],
     ) {
-        no_side_effect!(self.read_pixels_into_buffer(x, y, width, height, format, pixel_type, dst_buffer))
+        no_side_effect!(
+            self.read_pixels_into_buffer(x, y, width, height, format, pixel_type, dst_buffer)
+        )
     }
 
     fn read_pixels(
@@ -509,8 +521,17 @@ where
         ty: GLenum,
         opt_data: Option<&[u8]>,
     ) {
-        simple!(self.tex_image_2d(target, level, internal_format, width, height,
-                                  border, format, ty, opt_data))
+        simple!(self.tex_image_2d(
+            target,
+            level,
+            internal_format,
+            width,
+            height,
+            border,
+            format,
+            ty,
+            opt_data
+        ))
     }
 
     fn compressed_tex_image_2d(
@@ -553,8 +574,18 @@ where
         ty: GLenum,
         opt_data: Option<&[u8]>,
     ) {
-        simple!(self.tex_image_3d(target, level, internal_format, width, height, depth,
-                                  border, format, ty, opt_data))
+        simple!(self.tex_image_3d(
+            target,
+            level,
+            internal_format,
+            width,
+            height,
+            depth,
+            border,
+            format,
+            ty,
+            opt_data
+        ))
     }
 
     fn copy_tex_image_2d(
@@ -627,7 +658,9 @@ where
         ty: GLenum,
         offset: usize,
     ) {
-        simple!(self.tex_sub_image_2d_pbo(target, level, xoffset, yoffset, width, height, format, ty, offset))
+        simple!(self.tex_sub_image_2d_pbo(
+            target, level, xoffset, yoffset, width, height, format, ty, offset
+        ))
     }
 
     fn tex_sub_image_3d(
@@ -644,8 +677,9 @@ where
         ty: GLenum,
         data: &[u8],
     ) {
-        simple!(self.tex_sub_image_3d(target, level, xoffset, yoffset, zoffset, width, height, depth,
-                                      format, ty, data))
+        simple!(self.tex_sub_image_3d(
+            target, level, xoffset, yoffset, zoffset, width, height, depth, format, ty, data
+        ))
     }
 
     fn tex_sub_image_3d_pbo(
@@ -732,7 +766,14 @@ where
         width: GLsizei,
         height: GLsizei,
     ) {
-        simple!(self.invalidate_sub_framebuffer(target, attachments, xoffset, yoffset, width, height))
+        simple!(self.invalidate_sub_framebuffer(
+            target,
+            attachments,
+            xoffset,
+            yoffset,
+            width,
+            height
+        ))
     }
 
     unsafe fn get_integer_v(&self, name: GLenum, result: &mut [GLint]) {
@@ -818,7 +859,9 @@ where
         mask: GLbitfield,
         filter: GLenum,
     ) {
-        simple!(self.blit_framebuffer(src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, mask, filter))
+        simple!(self.blit_framebuffer(
+            src_x0, src_y0, src_x1, src_y1, dst_x0, dst_y0, dst_x1, dst_y1, mask, filter
+        ))
     }
 
     fn vertex_attrib_4f(&self, index: GLuint, x: GLfloat, y: GLfloat, z: GLfloat, w: GLfloat) {

@@ -42,35 +42,14 @@ pub use serialize::{Serialize, Serializer};
 
 pub struct Recorder<G, S> {
     inner_gl: G,
-    locked: sync::Mutex<Locked<S>>,
+    inner_recorder: sync::Mutex<InnerRecorder<S>>,
 }
 
-pub(crate) struct Locked<S> {
+pub(crate) struct InnerRecorder<S> {
     serializer: S,
 }
 
 impl<G, S> Recorder<G, S> {
-    /// Return a new `Recorder` for `inner_gl`, using `serializer`.
-    ///
-    /// The `inner_gl` argument must be a pointer to a value that implements
-    /// [`gleam::Gl`], like `Rc<dyn Gl>`. (Specifically, `inner_gl` must
-    /// implement `Deref<Target=Gl>`.)
-    ///
-    /// [`gleam::Gl`]: https://docs.rs/gleam/0.11.0/gleam/gl/trait.Gl.html
-    pub fn with_serializer(inner_gl: G, serializer: S) -> Recorder<G, S>
-    where
-        S: Serializer,
-        G: Deref,
-        G::Target: Gl,
-    {
-        let locked = Locked::new(serializer);
-
-        Recorder {
-            inner_gl,
-            locked: sync::Mutex::new(locked),
-        }
-    }
-
     /// Record a new `Recorder` for `inner_gl`, logging calls to disk.
     ///
     /// The `path` argument is the name of a directory to create to hold the
@@ -84,25 +63,47 @@ impl<G, S> Recorder<G, S> {
         Ok(Recorder::with_serializer(inner_gl, Files::create(path)?))
     }
 
+    /// Return a new `Recorder` for `inner_gl`, using `serializer`.
+    ///
+    /// The `inner_gl` argument must be a pointer to a value that implements
+    /// [`gleam::Gl`], like `Rc<dyn Gl>`. (Specifically, `inner_gl` must
+    /// implement `Deref<Target=Gl>`.)
+    ///
+    /// [`gleam::Gl`]: https://docs.rs/gleam/0.11.0/gleam/gl/trait.Gl.html
+    pub fn with_serializer(inner_gl: G, serializer: S) -> Recorder<G, S>
+    where
+        S: Serializer,
+        G: Deref,
+        G::Target: Gl,
+    {
+        let inner_recorder = InnerRecorder::new(serializer);
+
+        Recorder {
+            inner_gl,
+            inner_recorder: sync::Mutex::new(inner_recorder),
+        }
+    }
+
     pub fn inner_gl(&self) -> &G {
         &self.inner_gl
     }
 }
 
-impl<S> Locked<S> {
-    fn new(serializer: S) -> Locked<S> {
-        Locked { serializer }
+impl<S> InnerRecorder<S> {
+    fn new(serializer: S) -> InnerRecorder<S> {
+        InnerRecorder { serializer }
     }
 }
 
-impl<S: Serializer> Locked<S> {
-    pub(crate) fn write_call(&mut self, call: &call::Call) -> Result<(), S::Error>
-    {
+impl<S: Serializer> InnerRecorder<S> {
+    pub(crate) fn write_call(&mut self, call: &call::Call) -> Result<(), S::Error> {
         self.serializer.write_call(call)
     }
 
-    pub(crate) fn write_variable<T: Serialize + ?Sized>(&mut self, var: &T) -> Result<usize, S::Error>
-    {
+    pub(crate) fn write_variable<T: Serialize + ?Sized>(
+        &mut self,
+        var: &T,
+    ) -> Result<usize, S::Error> {
         let ident = self.serializer.next_variable_id();
         var.write(&mut self.serializer)?;
         Ok(ident)

@@ -26,7 +26,8 @@ pub trait Serialize {
     /// Serialize a `[Self]` slice. This can be overridden by implementations for types
     /// that can written as a single block.
     fn write_slice<S: Serializer>(this: &[Self], serializer: &mut S) -> Result<(), S::Error>
-        where Self: Sized
+    where
+        Self: Sized,
     {
         serializer.write_variable(raw::as_bytes(&this.len()))?;
         for elt in this {
@@ -66,12 +67,12 @@ impl<T: Serialize + ?Sized> Serialize for &T {
 
 impl<T: Serialize> Serialize for [T] {
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
-            <T as Serialize>::write_slice(self, serializer)
+        <T as Serialize>::write_slice(self, serializer)
     }
 }
 
 impl Serialize for str {
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
-            self.as_bytes().write(serializer)
+        self.as_bytes().write(serializer)
     }
 }

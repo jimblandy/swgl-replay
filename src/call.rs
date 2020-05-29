@@ -2,7 +2,9 @@
 
 #![allow(unused_imports)]
 
-use gleam::gl::{GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid};
+use gleam::gl::{
+    GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid,
+};
 
 /// An untyped memory buffer, passed as a `data`/`size` pair to some methods.
 pub struct GlRawBuf {
@@ -21,9 +23,7 @@ impl GlRawBuf {
 
     pub fn as_slice(&self) -> &[u8] {
         // Safe because of contract on GlRawBuf::new.
-        unsafe {
-            std::slice::from_raw_parts(self.data as *const u8, self.size as usize)
-        }
+        unsafe { std::slice::from_raw_parts(self.data as *const u8, self.size as usize) }
     }
 }
 
