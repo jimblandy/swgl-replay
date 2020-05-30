@@ -39,6 +39,10 @@ fn main() -> io::Result<()> {
             eprintln!("size of `Call` doesn't match: {}", dir);
             continue;
         }
+        if header[6] as usize != mem::align_of::<f64>() {
+            eprintln!("alignment of `f64` doesn't match: {}", dir);
+            continue;
+        }
 
         union CallBuffer {
             bytes: [u8; mem::size_of::<Call>()],

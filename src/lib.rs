@@ -33,7 +33,7 @@ use std::{io, sync};
 mod call;
 mod files;
 mod raw;
-mod recorder_impl;
+mod recorder_gl;
 mod replay;
 mod serialize;
 
@@ -106,7 +106,7 @@ impl<S: Serializer> InnerRecorder<S> {
         &mut self,
         var: &T,
     ) -> Result<usize, S::Error> {
-        let ident = self.serializer.next_variable_id();
+        let ident = self.serializer.variable_size();
         var.write(&mut self.serializer)?;
         Ok(ident)
     }

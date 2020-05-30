@@ -11,7 +11,7 @@ use crate::{call, raw};
 pub struct Files {
     calls: io::BufWriter<fs::File>,
     variable: io::BufWriter<fs::File>,
-    next_variable_offset: usize,
+    bytes_written: usize,
 }
 
 impl Files {
@@ -37,14 +37,14 @@ impl Files {
             b'R',
             mem::size_of::<usize>() as u8,
             mem::size_of::<call::Call>() as u8,
-            0,
+            mem::align_of::<f64>() as u8,
             0,
         ])?;
 
         Ok(Files {
             calls,
             variable,
-            next_variable_offset: 0,
+            bytes_written: 0,
         })
     }
 }
@@ -59,13 +59,13 @@ impl Serializer for Files {
 
     fn write_variable(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.variable.write_all(buf)?;
-        self.next_variable_offset += buf.len();
+        self.bytes_written += buf.len();
         Ok(())
     }
 
     /// Return an identifier for the next value written with `write_variable`.
-    fn next_variable_id(&self) -> usize {
-        self.next_variable_offset
+    fn variable_size(&self) -> usize {
+        self.bytes_written
     }
 
     fn flush(&mut self) -> Result<(), Self::Error> {
