@@ -34,7 +34,7 @@
 //! variable-length data, more complex types like `&[&[T]]` take more work.
 //! That is serialized as:
 //!
-//!     <length of outer slice> ( <length of inner slice> <T values> ) *
+//!     <length of outer slice> ( <length of inner slice> ( <T value> ) * ) *
 //!
 //! where each 'length' is a `usize`. We deserialize this as a `Vec<&[T]>`,
 //! where the `Vec` is produced element-by-element by iterating over the data,
