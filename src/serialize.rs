@@ -1,3 +1,46 @@
+//! Custom Serialize and Deserialize traits.
+//!
+//! This module defines simplified variants of the serde serialization and
+//! deserialization traits that permit a bit more zero-copy access (and thus,
+//! hopefully, a bit less overhead). Serde will only borrow `str` and `[u8]`
+//! directly out of the serialized data, whereas this module's traits will also
+//! borrow `[GLfloat]` and things like that. Also, the breadth of types needed
+//! to record a `Gl` session are pretty limited, so we can avoid some of serde's
+//! complications.
+//!
+//! A GL recording includes two streams of serialized data:
+//!
+//! - There is a stream of fixed-size `Call` values. The `Call` enum identifies
+//!   the `Gl` method being invoked, and can hold arguments to that method if
+//!   they are integers, floats, or similarly simple-minded types. But `Call` is
+//!   `Copy + 'static`, so it can't own or borrow any recording of variable-
+//!   length buffers being passed to and from Gl.
+//!
+//! - Thus, a second stream of variable-length values holds buffers, strings,
+//!   and the like. The `Call` then stores the offset at which the associated
+//!   data is stored in the variable-length stream. (Also, some methods take so
+//!   many arguments that the `Call` enum would become quite large if it stored
+//!   them directly, so instead we stash their arguments in the variable-length
+//!   stream as well.)
+//!
+//! To keep deserialization overhead down, we want to be able to borrow values
+//! directly from the buffer of serialized data whenever possible. The `Call`
+//! type is designed to be used in this way: the bytes of the call stream are
+//! interpreted directly as a `[Call]` slice. (I wonder if touching the enum's
+//! padding bytes when we write the stream out counts as UB.)
+//!
+//! Using the variable-length data is not so simple, however. Although we are
+//! able to borrow slices of simple `Copy + 'static` types directly out of the
+//! variable-length data, more complex types like `&[&[T]]` take more work.
+//! That is serialized as:
+//!
+//!     <length of outer slice> ( <length of inner slice> <T values> ) *
+//!
+//! where each 'length' is a `usize`. We deserialize this as a `Vec<&[T]>`,
+//! where the `Vec` is produced element-by-element by iterating over the data,
+//! and the `&[T]` slices borrow from the data. (The variable-length stream
+//! includes padding before each value for alignment, not shown.)
+
 use std::mem;
 
 use crate::call;
@@ -118,7 +161,7 @@ fn take_slice<'b, T: Copy + 'static>(buf: &mut &'b [u8], count: usize) -> Result
     let size: usize = mem::size_of::<T>();
     let align: usize = mem::align_of::<T>();
 
-    let align_skip = (align - buf.as_ptr() as usize) & !(align-1);
+    let align_skip = (0 - buf.as_ptr() as usize) & (align-1);
     let full_len = align_skip + size * count;
     if buf.len() < full_len {
         return Err(DeserializeError::UnexpectedEof);
