@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::io::prelude::*;
 use std::{fs, io, mem, path};
 
-use gl_replay::Call;
+use gl_replay::{Call, Recording};
 
 const USAGE: &'static str = "
 Dump gl-replay command log.
@@ -27,20 +27,8 @@ fn main() -> io::Result<()> {
 
         let mut header = [0_u8; 8];
         file.read_exact(&mut header)?;
-        if &header[0..4] != b"GLRR" {
-            eprintln!("bad magic number: {}", dir);
-            continue;
-        }
-        if header[4] as usize != mem::size_of::<usize>() {
-            eprintln!("size of `usize` doesn't match: {}", dir);
-            continue;
-        }
-        if header[5] as usize != mem::size_of::<Call>() {
-            eprintln!("size of `Call` doesn't match: {}", dir);
-            continue;
-        }
-        if header[6] as usize != mem::align_of::<f64>() {
-            eprintln!("alignment of `f64` doesn't match: {}", dir);
+        if let Err(err) = Recording::check_header(&header) {
+            eprintln!("{}: {}", err, dir);
             continue;
         }
 

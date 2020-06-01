@@ -63,7 +63,7 @@ pub trait Serializer {
         let pos = self.variable_size();
         let align: usize = mem::align_of::<T>();
 
-        let align_skip = (0 - pos) & (align-1);
+        let align_skip = (0 - pos) & (align - 1);
         if align_skip > 0 {
             static PADDING: [u8; 64] = [b'P'; 64];
             assert!(align_skip <= PADDING.len());
@@ -144,10 +144,11 @@ impl<'b, T: Deserialize<'b>> Deserialize<'b> for Vec<T> {
 impl<'b> Deserialize<'b> for &'b str {
     fn deserialize(buf: &mut &'b [u8]) -> Result<&'b str, DeserializeError> {
         let bytes: &[u8] = Deserialize::deserialize(buf)?;
-        std::str::from_utf8(bytes)
-            .map_err(|_| DeserializeError::BadUTF8)
+        std::str::from_utf8(bytes).map_err(|_| DeserializeError::BadUTF8)
     }
 }
+
+
 
 /// Borrow a `&[T]` slice from `buf`, respecting `T`'s alignment requirements.
 ///
@@ -157,19 +158,21 @@ impl<'b> Deserialize<'b> for &'b str {
 ///
 /// Return an `DeserializeError` if `buf` is not large enough to hold the aligned
 /// slice.
-fn take_slice<'b, T: Copy + 'static>(buf: &mut &'b [u8], count: usize) -> Result<&'b [T], DeserializeError> {
+fn take_slice<'b, T: Copy + 'static>(
+    buf: &mut &'b [u8],
+    count: usize,
+) -> Result<&'b [T], DeserializeError> {
     let size: usize = mem::size_of::<T>();
     let align: usize = mem::align_of::<T>();
 
-    let align_skip = (0 - buf.as_ptr() as usize) & (align-1);
+    let align_skip = (0 - buf.as_ptr() as usize) & (align - 1);
     let full_len = align_skip + size * count;
     if buf.len() < full_len {
         return Err(DeserializeError::UnexpectedEof);
     }
 
-    let slice = unsafe {
-        std::slice::from_raw_parts(buf[align_skip..].as_ptr() as *const T, count)
-    };
+    let slice =
+        unsafe { std::slice::from_raw_parts(buf[align_skip..].as_ptr() as *const T, count) };
 
     *buf = &buf[full_len..];
     Ok(slice)
@@ -212,11 +215,14 @@ pub enum DeserializeError {
 impl std::fmt::Display for DeserializeError {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
         fmt.write_str(match self {
-            DeserializeError::UnexpectedEof =>
-                "serialized OpenGL method call argument data truncated",
-            DeserializeError::BadUTF8 =>
-                "serialized OpenGL method call argument data included bad UTF-8",
+            DeserializeError::UnexpectedEof => {
+                "serialized OpenGL method call argument data truncated"
+            }
+            DeserializeError::BadUTF8 => {
+                "serialized OpenGL method call argument data included bad UTF-8"
+            }
         })
     }
 }
 
+impl std::error::Error for DeserializeError { }

@@ -38,7 +38,7 @@ mod replay;
 mod serialize;
 
 pub use call::{BufFromGl, BufToGl, Call};
-pub use files::Files;
+pub use files::{Files, Recording};
 pub use replay::replay;
 pub use serialize::{Serialize, Serializer};
 

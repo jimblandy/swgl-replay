@@ -7,11 +7,11 @@ use std::os::raw::{c_int, c_void};
 use super::{InnerRecorder, Recorder, Serialize, Serializer};
 use crate::call::{BufFromGl, BufToGl, Call, GlRawBuf};
 
-/// A `Gl` method parameter type that we can serialize without help.
+/// A `Gl` method parameter type that we can serialize without custom code.
 ///
-/// A `Parameter` type is one that is passed to or returned from `Gl` methods,
-/// and is represented in `Call` variants by the `InCall` type from this trait.
-/// For example:
+/// This `Parameter` trait represents a type that is passed to or returned from
+/// `Gl` methods, and is represented in `Call` variants by the `InCall` type
+/// from this trait. For example:
 ///
 /// - `u32` and `f32` parameters are just recorded directly in the `Call`,
 ///   so their `InCall` types are simply `u32` and `f32`.
@@ -20,6 +20,8 @@ use crate::call::{BufFromGl, BufToGl, Call, GlRawBuf};
 ///   `Call` holds a `BufToGl` value representing its entry there. Thus, `str`'s
 ///   associated `InCall` type is `BufToGl`. Its `to_call` implementation writes
 ///   out its contents, and returns the `BufToGl`.
+///
+/// There is a complementary `Parameter` trait for deserialization.
 trait Parameter {
     type InCall;
 
