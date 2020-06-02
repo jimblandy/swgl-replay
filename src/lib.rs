@@ -32,12 +32,14 @@ use std::{io, sync};
 
 mod call;
 mod files;
+mod forms;
 mod raw;
 mod recorder_gl;
 mod replay;
 mod serialize;
 
-pub use call::{BufFromGl, BufToGl, Call};
+pub use call::Call;
+pub use forms::{Var, Seq};
 pub use files::{Files, Recording};
 pub use replay::replay;
 pub use serialize::{Serialize, Serializer};

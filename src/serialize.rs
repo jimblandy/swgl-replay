@@ -44,6 +44,7 @@
 use std::mem;
 
 use crate::call;
+use crate::forms::{Seq, Str};
 use crate::raw;
 
 /// A trait for types that can serialize GL method call streams.
@@ -83,6 +84,9 @@ pub trait Serializer {
 
 /// A type that can be serialized to a Serializer.
 pub trait Serialize {
+    /// The form in which `Self` values are serialized.
+    type Form;
+
     /// Serialize a single `Self` value.
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error>;
 
@@ -101,18 +105,32 @@ pub trait Serialize {
 }
 
 impl<T: Serialize + ?Sized> Serialize for &T {
+    type Form = T::Form;
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
         (*self).write(serializer)
     }
 }
 
-impl<T: Serialize> Serialize for [T] {
+impl<T: Serialize> Serialize for [T]
+    where T::Form: Sized
+{
+    type Form = Seq<T::Form>;
+    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
+        <T as Serialize>::write_slice(self, serializer)
+    }
+}
+
+impl<T: Serialize> Serialize for Vec<T>
+    where T::Form: Sized
+{
+    type Form = Seq<T::Form>;
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
         <T as Serialize>::write_slice(self, serializer)
     }
 }
 
 impl Serialize for str {
+    type Form = Str;
     fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
         self.as_bytes().write(serializer)
     }
@@ -148,8 +166,6 @@ impl<'b> Deserialize<'b> for &'b str {
     }
 }
 
-
-
 /// Borrow a `&[T]` slice from `buf`, respecting `T`'s alignment requirements.
 ///
 /// Skip bytes from the front of `buf` until it is aligned as required to hold a
@@ -182,6 +198,8 @@ macro_rules! simply_serialized_types {
     ( $( $type:ty ),* ) => {
         $(
             impl Serialize for $type {
+                type Form = $type;
+
                 fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
                     serializer.write_variable(raw::as_bytes(self))
                 }
@@ -225,4 +243,4 @@ impl std::fmt::Display for DeserializeError {
     }
 }
 
-impl std::error::Error for DeserializeError { }
+impl std::error::Error for DeserializeError {}

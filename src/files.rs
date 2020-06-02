@@ -98,14 +98,18 @@ fn read_vector<T: Copy + 'static>(
     mut file: fs::File,
     skipped: usize,
     file_name: &str,
-    type_name: &str)
- -> io::Result<Vec<T>> {
+    type_name: &str,
+) -> io::Result<Vec<T>> {
     // Make sure the remaining data has the size of a whole number of `T` values.
     let size = file.metadata()?.len() as usize - skipped;
     if size % mem::size_of::<T>() != 0 {
-        return Err(io::Error::new(io::ErrorKind::Other,
-                                  format!("gl-record {} file size is not an even number of {} structures",
-                                          file_name, type_name)));
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "gl-record {} file size is not an even number of {} structures",
+                file_name, type_name
+            ),
+        ));
     }
 
     // Allocate a vector of the appropriate capacity. We just checked that this
@@ -121,9 +125,7 @@ fn read_vector<T: Copy + 'static>(
 
     // Get a slice referring to the portion of vector's unused capacity that
     // we'll populate.
-    let elt_slice = unsafe {
-        std::slice::from_raw_parts_mut(vec.as_mut_ptr(), len)
-    };
+    let elt_slice = unsafe { std::slice::from_raw_parts_mut(vec.as_mut_ptr(), len) };
     // But as bytes, as read_exact expects.
     let byte_slice = raw::slice_as_bytes_mut(elt_slice);
 
@@ -137,12 +139,17 @@ fn read_vector<T: Copy + 'static>(
     Ok(vec)
 }
 
-
 impl Recording {
     pub fn open<P: AsRef<Path>>(dir: P) -> io::Result<Recording> {
         let dir = dir.as_ref();
         let mut calls_file = fs::File::open(dir.join("calls"))?;
         let variable_file = fs::File::open(dir.join("variable"))?;
+
+        if calls_file.metadata()?.len() == 0 {
+            return Err(io::Error::new(io::ErrorKind::Other,
+                                      "gl-replay calls file is zero-length.\n\
+                                       Are you recording to the same file you're trying to replay from?"))
+        }
 
         let mut header = [0_u8; 8];
         calls_file.read_exact(&mut header)?;

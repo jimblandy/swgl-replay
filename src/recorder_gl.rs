@@ -5,36 +5,29 @@ use std::ops::Deref;
 use std::os::raw::{c_int, c_void};
 
 use super::{InnerRecorder, Recorder, Serialize, Serializer};
-use crate::call::{BufFromGl, BufToGl, Call, GlRawBuf};
+use crate::call::Call;
+use crate::forms::Var;
 
-/// A `Gl` method parameter type that we can serialize without custom code.
+
+/// A `Gl` method argument type.
 ///
-/// This `Parameter` trait represents a type that is passed to or returned from
-/// `Gl` methods, and is represented in `Call` variants by the `InCall` type
-/// from this trait. For example:
-///
-/// - `u32` and `f32` parameters are just recorded directly in the `Call`,
-///   so their `InCall` types are simply `u32` and `f32`.
-///
-/// - A `str` parameter gets written to the variable-length data stream, and the
-///   `Call` holds a `BufToGl` value representing its entry there. Thus, `str`'s
-///   associated `InCall` type is `BufToGl`. Its `to_call` implementation writes
-///   out its contents, and returns the `BufToGl`.
-///
-/// There is a complementary `Parameter` trait for deserialization.
+/// Some argument types we can include directly in the `Call`, like `f32`.
+/// Others we need to serialize out into the variable-length data section, and
+/// let the `Call` hold the value's offset there. The `Parameter` implementation
+/// determines which strategy we use.
 trait Parameter {
-    type InCall;
+    type Form;
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::InCall, S::Error>
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
     where
         S: Serializer;
 }
 
-macro_rules! simple_parameter_types {
+macro_rules! direct_parameter_types {
     ( $( $type:ty ),* ) => {
         $(
             impl Parameter for $type {
-                type InCall = Self;
+                type Form = Self;
                 fn to_call<S>(&self, _inner_recorder: &mut InnerRecorder<S>) -> Result<Self, S::Error>
                 where S: Serializer
                 {
@@ -47,84 +40,58 @@ macro_rules! simple_parameter_types {
 
 // These types appear as themselves in `Call`. This covers `GLenum`, `GLint`,
 // and friends.
-simple_parameter_types!(bool, u32, i32, u64, i64, f32, f64, usize);
+direct_parameter_types!(bool, u32, i32, u64, i64, f32, f64, usize);
 
-impl Parameter for str {
-    type InCall = BufToGl;
+macro_rules! sequence_parameter_types {
+    ( $( ( $( $quantifier:tt )* ) $type:ty ),* ) => {
+        $(
+            impl $( $quantifier )* Parameter for $type {
+                type Form = Var<<Self as Serialize>::Form>;
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufToGl, S::Error>
-    where
-        S: Serializer,
-    {
-        inner_recorder.write_variable(self).map(BufToGl)
+                fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
+                where S: Serializer
+                {
+                    inner_recorder.write_variable(self).map(Var::new)
+                }
+            }
+        )*
     }
 }
 
-impl<T: Serialize> Parameter for Vec<T> {
-    type InCall = BufFromGl;
+// The following types are serialized as sequences, and represented by a
+// `Var<Seq<...>>` in the `Call`.
+sequence_parameter_types!(() str, (<T: Serialize>) Vec<T>, (<T: Serialize>) [T]);
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufFromGl, S::Error>
-    where
-        S: Serializer,
-    {
-        inner_recorder.write_variable(&self[..]).map(BufFromGl)
+macro_rules! transparent_parameter_types {
+    ( $( $type:ty ),* ) => {
+        $(
+            impl<T: Parameter + ?Sized> Parameter for $type {
+                type Form = T::Form;
+
+                fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
+                where S: Serializer
+                {
+                    (**self).to_call(inner_recorder)
+                }
+            }
+        )*
     }
 }
 
-impl<T: Serialize> Parameter for [T] {
-    type InCall = BufToGl;
+// The following type constructors `C<T>` are serialized transparently, just like `T`.
+transparent_parameter_types!(&T, &mut T);
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufToGl, S::Error>
-    where
-        S: Serializer,
-    {
-        inner_recorder.write_variable(self).map(BufToGl)
-    }
-}
-
-impl<T: Serialize + ?Sized> Parameter for &T {
-    type InCall = BufToGl;
-
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufToGl, S::Error>
-    where
-        S: Serializer,
-    {
-        inner_recorder.write_variable(self).map(BufToGl)
-    }
-}
-
-impl<T: Serialize + ?Sized> Parameter for &mut T {
-    type InCall = BufFromGl;
-
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<BufFromGl, S::Error>
-    where
-        S: Serializer,
-    {
-        inner_recorder.write_variable(&**self).map(BufFromGl)
-    }
-}
-
+/// We serialize `Option<T>` as a `T` if it is `Some`.
 impl<T: Parameter> Parameter for Option<T> {
-    type InCall = Option<T::InCall>;
+    type Form = Option<T::Form>;
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::InCall, S::Error>
+    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
     where
         S: Serializer,
     {
         self.as_ref()
             .map(|param| param.to_call(inner_recorder))
-            .transpose()
-    }
-}
-
-impl Parameter for GlRawBuf {
-    type InCall = BufToGl;
-
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::InCall, S::Error>
-    where
-        S: Serializer,
-    {
-        inner_recorder.write_variable(self.as_slice()).map(BufToGl)
+            .transpose() // from `Option<Result>` to `Result<Option>`
     }
 }
 
@@ -222,7 +189,9 @@ where
             let returned = self.buffer_data_untyped(target, size, data, usage);
             lock inner_recorder;
             {
-                let size_data = unsafe { GlRawBuf::new_unchecked(data, size) };
+                let size_data = unsafe {
+                    std::slice::from_raw_parts(data as *const u8, size as usize)
+                };
                 let call = Call::buffer_data_untyped {
                     target,
                     size_data: check!(size_data.to_call(&mut inner_recorder)),

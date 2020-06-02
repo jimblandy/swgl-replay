@@ -1,93 +1,39 @@
 use gleam::gl::Gl;
 
-use crate::call;
-use crate::Recording;
-use crate::serialize::Deserialize;
+#[allow(unused_imports)]
+use gleam::gl::{
+    GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid,
+};
 
-/*
-/// A `Gl` parameter type that we can deserialize without custom code.
+use crate::call;
+use crate::forms::{Var, Seq, Str};
+use crate::serialize::Deserialize;
+use crate::Recording;
+
+/// A `Gl` method argument type.
 ///
-/// There are three levels of 'difficulty', so to speak, in obtaining parameter
-/// values we can pass to `Gl` trait methods:
-///
-/// - The easiest are types like `f32`. These are stored directly in the `Call`,
-///   and can be passed directly to the `Gl` method. (We may add an exception
-///   for methods with very long argument lists.)
-///
-/// - The next level of difficulty is types like `&[GLuint]`. These can't be
-///   stored in the `Call`, but they can be borrowed directly from the
-///   variable-length data section.
-///
-/// - The worst level of difficulty is types like &[&[u8]]. These need to be
-///   deserialized to a `Vec<&[u8]>`, which must then be moved to a location
-///   that is owned for the duration of the `Gl` method call, and borrowed to be
-///   passed.
-///
-/// This trait handles the worst case in a way that should still generate good
-/// code for the simpler cases. If the `Call` variant for a method `m` has a
-/// field named `x`, we call the method with code like:
-///
-///    let x = x.from_call(&variable);
-///    gl.m(..., x.to_argument(), ...)
-///
-/// This handles all three cases:
-///
-/// - For a simple type like `f32`, `from_call` is the identity function, and
-///   `to_argument` simply dereferences its `&self` argument.
-///
-/// - For an argument type like `&[GLuint]`, `from_call` borrows data from the
-///   variable-length section, and `to_argument` dereferences.
-///
-/// - For an argument type like `&[&[u8]]`, `from_call` builds a `Vec<&[u8]>`,
-///   which is owned by `x` across the call, and `to_argument` borrows the outer
-///   slice.
-///
-/// The trait's lifetime parameter `'v` is the lifetime of the variable-length
-/// data, to allow `from_call` implementations to borrow from there.
+/// The `'v` lifetime parameter is the lifetime of the variable-length data. It
+/// allows implementations to return values that borrow from that, instead of
+/// copying.
 trait Parameter<'v>: Sized {
-    /// The owned form of the type, as returned by `from_call`.
+    /// How parameters of this type are represented in a `Call`.
+    type InCall;
+
+    /// The owned form of the parameter.
     type Held;
 
-    /// The type actually passed to the `Gl` method, as returned by `to_argument`.
-    type Passed;
-
-    fn from_call(self, variable: &'v [u8]) -> Holder<'v, Self>;
-    fn to_argument(held: &Self::Held) -> Self::Passed;
+    fn from_call(in_call: Self::InCall, variable: &'v [u8]) -> Self::Held;
+    fn to_argument(held: &Self::Held) -> Self;
 }
-
-/// Helper type for `Parameter` trait.
-struct Holder<'v, T: Parameter<'v>>(T::Held);
-
-impl<'v, T: Parameter<'v>> Holder<'v, T> {
-    fn to_argument(&self) -> T::Passed {
-        T::to_argument(&self.0)
-    }
-}
-
-impl<'v> Parameter<'v> for &'v str {
-    type Held = &'v str;
-    type Passed = &'v str;
-    fn from_call(self, mut variable: &'v [u8]) -> Holder<&'v str> {
-        Holder(<&'v str>::deserialize(&mut variable).expect("deserializing `str` failed"))
-    }
-    fn to_argument(held: &&'v str) -> &'v str {
-        *held
-    }
-}
-
-impl<'v> Parameter<'v> for 
 
 macro_rules! simply_deserialized_types {
     ( $( $type:ty ),* ) => {
         $(
             impl<'v> Parameter<'v> for $type {
+                type InCall = $type;
                 type Held = $type;
-                type Passed = $type;
-                fn from_call(self, mut variable: &'v [u8]) -> Holder<$type> {
-                    Holder(<$type>::deserialize(&mut variable)
-                           .expect(concat!("deserializing ",
-                                           stringify!($type),
-                                           " failed")))
+                fn from_call(in_call: $type, _variable: &'v [u8]) -> Self::Held {
+                    in_call
                 }
                 fn to_argument(held: & $type) -> $type {
                     *held
@@ -99,8 +45,57 @@ macro_rules! simply_deserialized_types {
 
 // These types are serialized in variable content as themselves.
 simply_deserialized_types!(bool, u8, u32, i32, f32, f64, usize);
- */
 
+fn get_slice<'v, T: 'v>(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T]
+    where &'v [T]: Deserialize<'v>
+{
+    let mut variable = &variable[in_call.offset()..];
+    <&[T]>::deserialize(&mut variable)
+        .expect("deserializing slice failed")
+}
+
+impl<'v, T: 'v> Parameter<'v> for &'v [T]
+    where &'v [T]: Deserialize<'v>
+{
+    type InCall = Var<Seq<T>>;
+    type Held = &'v [T];
+
+    fn from_call(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T] {
+        get_slice(in_call, variable)
+    }
+    fn to_argument(held: &&'v [T]) -> &'v [T] {
+        *held
+    }
+}
+
+impl<'v> Parameter<'v> for &'v str {
+    type InCall = Var<Str>;
+    type Held = &'v str;
+
+    fn from_call(in_call: Var<Str>, variable: &'v [u8]) -> &'v str {
+        let mut variable = &variable[in_call.offset()..];
+        <&'v str>::deserialize(&mut variable)
+            .expect("deserializing &str parameter failed")
+    }
+    fn to_argument(held: &&'v str) -> &'v str {
+        *held
+    }
+}
+
+macro_rules! check_returned {
+    ( $recording:ident : $gl:ident . $method:ident ( $( $arg:ident ),* ): $returned:ident ) => {
+        {
+            let actual = $gl . $method ( $( $arg )* );
+            let expected = get_slice( $returned, & $recording . variable );
+            if expected != &actual[..] {
+                eprintln!("gl-replay: method gen_buffers returned unexpected value");
+                eprintln!("expected: {:?}", expected);
+                eprintln!("actual: {:?}", actual);
+                panic!("replay cannot proceed");
+            }
+        }
+    }
+}
 
 #[allow(unused_variables)]
 pub fn replay(gl: &dyn Gl, recording: &Recording) {
@@ -117,23 +112,38 @@ pub fn replay(gl: &dyn Gl, recording: &Recording) {
                 size_data,
                 usage,
             } => {
-                let mut variable = &recording.variable[..];
-                let size_data = call::GlRawBuf::from(
-                    <&[u8]>::deserialize(&mut variable)
-                        .expect("failed to deserialize data for buffer_data_untyped"));
-                gl.buffer_data_untyped(target, size_data.size, size_data.data, usage)
+                let mut variable = &recording.variable[size_data.offset()..];
+                let size_data = <&[u8]>::deserialize(&mut variable)
+                    .expect("failed to deserialize data for buffer_data_untyped");
+                gl.buffer_data_untyped(target,
+                                       size_data.len() as GLsizeiptr,
+                                       size_data.as_ptr() as *const GLvoid,
+                                       usage)
             }
             clear_color { r, g, b, a } => { gl.clear_color(r, g, b, a); }
             disable { cap } => { gl.disable(cap); }
             disable_vertex_attrib_array { index } => { gl.disable_vertex_attrib_array(index); }
             enable { cap } => { gl.enable(cap); }
             enable_vertex_attrib_array { index } => { gl.enable_vertex_attrib_array(index); }
-            gen_buffers { n, returned } => unimplemented!("gen_buffers"),
-            gen_framebuffers { n, returned } => unimplemented!("gen_framebuffers"),
-            gen_queries { n, returned } => unimplemented!("gen_queries"),
-            gen_renderbuffers { n, returned } => unimplemented!("gen_renderbuffers"),
-            gen_textures { n, returned } => unimplemented!("gen_textures"),
-            gen_vertex_arrays { n, returned } => unimplemented!("gen_vertex_arrays"),
+            gen_buffers { n, returned } => {
+                check_returned!(recording: gl.gen_buffers(n) : returned)
+            }
+            gen_framebuffers { n, returned } => {
+                check_returned!(recording: gl.gen_framebuffers(n) : returned)
+            }
+            gen_queries { n, returned } => {
+                check_returned!(recording: gl.gen_queries(n) : returned)
+            }
+            gen_renderbuffers { n, returned } => {
+                check_returned!(recording: gl.gen_renderbuffers(n) : returned)
+            }
+            gen_textures { n, returned } => {
+                check_returned!(recording: gl.gen_textures(n) : returned)
+            }
+            gen_vertex_arrays { n, returned } => {
+                check_returned!(recording: gl.gen_vertex_arrays(n) : returned)
+            }
+
             gen_vertex_arrays_apple { n, returned } => unimplemented!("gen_vertex_arrays_apple"),
             line_width { width } => { gl.line_width(width); }
             pixel_store_i { name, param } => { gl.pixel_store_i(name, param); }

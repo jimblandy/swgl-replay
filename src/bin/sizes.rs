@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types, dead_code)]
 
+#[allow(unused_imports)]
 use gleam::gl::{
     GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid,
 };
