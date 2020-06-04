@@ -12,39 +12,33 @@ use crate::Recording;
 
 /// A `Gl` method argument type.
 ///
+/// Some types of arguments are stored directly in the `Call` variant, like
+/// `f32`. Others are stored in the variable-length data, like `&[u8]`, with a
+/// `Var<...>` value in the `Call` to represent them. Either way, the
+/// implementation of `Parameter` obtains the value to pass to the `Gl` method.
+///
 /// The `'v` lifetime parameter is the lifetime of the variable-length data. It
 /// allows implementations to return values that borrow from that, instead of
 /// copying.
-trait Parameter<'v>: Sized {
-    /// How parameters of this type are represented in a `Call`.
-    type InCall;
-
-    /// The owned form of the parameter.
-    type Held;
-
-    fn from_call(in_call: Self::InCall, variable: &'v [u8]) -> Self::Held;
-    fn to_argument(held: &Self::Held) -> Self;
+trait Parameter<'v, InCall>: Sized {
+    fn from_call(in_call: InCall, variable: &'v [u8]) -> Self;
 }
 
-macro_rules! simply_deserialized_types {
+macro_rules! simple_parameter_types {
     ( $( $type:ty ),* ) => {
         $(
-            impl<'v> Parameter<'v> for $type {
-                type InCall = $type;
-                type Held = $type;
-                fn from_call(in_call: $type, _variable: &'v [u8]) -> Self::Held {
+            impl<'v> Parameter<'v, $type> for $type {
+                fn from_call(in_call: $type, _variable: &'v [u8]) -> Self {
                     in_call
-                }
-                fn to_argument(held: & $type) -> $type {
-                    *held
                 }
             }
         )*
     }
 }
 
-// These types are serialized in variable content as themselves.
-simply_deserialized_types!(bool, u8, u32, i32, f32, f64, usize);
+// These types are stored directly in the `Call`. We don't need to consult the
+// variable-length data to get their values.
+simple_parameter_types!(bool, u8, u32, i32, f32, f64, usize);
 
 fn get_slice<'v, T: 'v>(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T]
     where &'v [T]: Deserialize<'v>
@@ -54,41 +48,59 @@ fn get_slice<'v, T: 'v>(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T]
         .expect("deserializing slice failed")
 }
 
-impl<'v, T: 'v> Parameter<'v> for &'v [T]
+impl<'v, T: 'v> Parameter<'v, Var<Seq<T>>> for &'v [T]
     where &'v [T]: Deserialize<'v>
 {
-    type InCall = Var<Seq<T>>;
-    type Held = &'v [T];
-
     fn from_call(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T] {
         get_slice(in_call, variable)
     }
-    fn to_argument(held: &&'v [T]) -> &'v [T] {
-        *held
-    }
 }
 
-impl<'v> Parameter<'v> for &'v str {
-    type InCall = Var<Str>;
-    type Held = &'v str;
-
+impl<'v> Parameter<'v, Var<Str>> for &'v str {
     fn from_call(in_call: Var<Str>, variable: &'v [u8]) -> &'v str {
         let mut variable = &variable[in_call.offset()..];
         <&'v str>::deserialize(&mut variable)
             .expect("deserializing &str parameter failed")
     }
-    fn to_argument(held: &&'v str) -> &'v str {
-        *held
+}
+
+impl<'v, T, U> Parameter<'v, Option<U>> for Option<T>
+where T: Parameter<'v, U>
+{
+    fn from_call(in_call: Option<U>, variable: &'v [u8]) -> Option<T> {
+        in_call.map(|in_call| {
+            T::from_call(in_call, variable)
+        })
     }
 }
 
-macro_rules! check_returned {
-    ( $recording:ident : $gl:ident . $method:ident ( $( $arg:ident ),* ): $returned:ident ) => {
+fn get_parameter<'v, P, C>(in_call: C, variable: &'v [u8]) -> P
+where P: Parameter<'v, C>
+{
+    P::from_call(in_call, variable)
+}
+
+macro_rules! simple {
+    ( $locals:ident : $method:ident ( $( $arg:ident, )* ) ) =>
+    {
         {
-            let actual = $gl . $method ( $( $arg )* );
-            let expected = get_slice( $returned, & $recording . variable );
+            $locals .gl. $method (
+                $(
+                    get_parameter( $arg, & $locals .recording.variable ),
+                )*
+            )
+        }
+    }
+}
+
+macro_rules! check_returned_vector {
+    ( $locals:ident : $method:ident ( $( $arg:ident ),* ): $returned:ident ) => {
+        {
+            let actual = $locals .gl. $method ( $( $arg )* );
+            let expected = get_slice( $returned, & $locals .recording.variable );
             if expected != &actual[..] {
-                eprintln!("gl-replay: method gen_buffers returned unexpected value");
+                eprintln!("gl-replay: method {} (serial {}) returned unexpected value",
+                          stringify!( $method ), $locals .i);
                 eprintln!("expected: {:?}", expected);
                 eprintln!("actual: {:?}", actual);
                 panic!("replay cannot proceed");
@@ -99,9 +111,16 @@ macro_rules! check_returned {
 
 #[allow(unused_variables)]
 pub fn replay(gl: &dyn Gl, recording: &Recording) {
-    for call in &recording.calls {
+    struct Locals<'g> {
+        gl: &'g dyn Gl,
+        recording: &'g Recording,
+        i: usize
+    }
+    let mut locals = Locals { gl, recording, i: 0 };
+    for (i, call) in recording.calls.iter().enumerate() {
         let call = *call;
         use call::Call::*;
+        locals.i = i;
         match call {
             active_texture { texture } => { gl.active_texture(texture); }
             bind_buffer { target, buffer } => { gl.bind_buffer(target, buffer); }
@@ -126,22 +145,22 @@ pub fn replay(gl: &dyn Gl, recording: &Recording) {
             enable { cap } => { gl.enable(cap); }
             enable_vertex_attrib_array { index } => { gl.enable_vertex_attrib_array(index); }
             gen_buffers { n, returned } => {
-                check_returned!(recording: gl.gen_buffers(n) : returned)
+                check_returned_vector!(locals: gen_buffers(n) : returned)
             }
             gen_framebuffers { n, returned } => {
-                check_returned!(recording: gl.gen_framebuffers(n) : returned)
+                check_returned_vector!(locals: gen_framebuffers(n) : returned)
             }
             gen_queries { n, returned } => {
-                check_returned!(recording: gl.gen_queries(n) : returned)
+                check_returned_vector!(locals: gen_queries(n) : returned)
             }
             gen_renderbuffers { n, returned } => {
-                check_returned!(recording: gl.gen_renderbuffers(n) : returned)
+                check_returned_vector!(locals: gen_renderbuffers(n) : returned)
             }
             gen_textures { n, returned } => {
-                check_returned!(recording: gl.gen_textures(n) : returned)
+                check_returned_vector!(locals: gen_textures(n) : returned)
             }
             gen_vertex_arrays { n, returned } => {
-                check_returned!(recording: gl.gen_vertex_arrays(n) : returned)
+                check_returned_vector!(locals: gen_vertex_arrays(n) : returned)
             }
 
             gen_vertex_arrays_apple { n, returned } => unimplemented!("gen_vertex_arrays_apple"),
@@ -190,18 +209,20 @@ pub fn replay(gl: &dyn Gl, recording: &Recording) {
                 format,
                 ty,
                 opt_data,
-            } => unimplemented!("tex_image_3d") /*gl.tex_image_3d(
-                target,
-                level,
-                internal_format,
-                width,
-                height,
-                depth,
-                border,
-                format,
-                ty,
-                opt_data,
-)*/,
+            } => {
+                simple!(locals: tex_image_3d(
+                    target,
+                    level,
+                    internal_format,
+                    width,
+                    height,
+                    depth,
+                    border,
+                    format,
+                    ty,
+                    opt_data,
+                ))
+            }
             tex_parameter_f {
                 target,
                 pname,
@@ -232,19 +253,21 @@ pub fn replay(gl: &dyn Gl, recording: &Recording) {
                 format,
                 ty,
                 data,
-            } => unimplemented!("tex_sub_image_3d") /*gl.tex_sub_image_3d(
-                target,
-                level,
-                xoffset,
-                yoffset,
-                zoffset,
-                width,
-                height,
-                depth,
-                format,
-                ty,
-                data,
-)*/,
+            } => {
+                simple!(locals: tex_sub_image_3d(
+                    target,
+                    level,
+                    xoffset,
+                    yoffset,
+                    zoffset,
+                    width,
+                    height,
+                    depth,
+                    format,
+                    ty,
+                    data,
+                ))
+            }
             use_program { program } => { gl.use_program(program); }
             vertex_attrib_divisor { index, divisor } => { gl.vertex_attrib_divisor(index, divisor); }
             vertex_attrib_i_pointer {

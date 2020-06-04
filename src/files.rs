@@ -68,7 +68,7 @@ impl Serializer for Files {
         Ok(())
     }
 
-    fn write_variable(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+    fn write_variable_unaligned(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
         self.variable.write_all(buf)?;
         self.bytes_written += buf.len();
         Ok(())

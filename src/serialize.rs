@@ -56,11 +56,12 @@ pub trait Serializer {
 
     /// Write the contents of the buffer `buf` to the variable-length data
     /// stream.
-    fn write_variable(&mut self, buf: &[u8]) -> Result<(), Self::Error>;
+    fn write_variable_unaligned(&mut self, buf: &[u8]) -> Result<(), Self::Error>;
 
-    /// Write `slice` to the variable-length data stream, padding as needed to
-    /// align it properly.
-    fn write_aligned_slice<T: Copy + 'static>(&mut self, slice: &[T]) -> Result<(), Self::Error> {
+    /// Write the contents of `slice` to the variable-length data stream,
+    /// starting with padding as needed to align it properly for elements of
+    /// type `T`. Return its post-alignment start position.
+    fn write_variable_aligned<T: Copy + 'static>(&mut self, slice: &[T]) -> Result<usize, Self::Error> {
         let pos = self.variable_size();
         let align: usize = mem::align_of::<T>();
 
@@ -68,10 +69,12 @@ pub trait Serializer {
         if align_skip > 0 {
             static PADDING: [u8; 64] = [b'P'; 64];
             assert!(align_skip <= PADDING.len());
-            self.write_variable(&PADDING[..align_skip])?;
+            self.write_variable_unaligned(&PADDING[..align_skip])?;
         }
 
-        self.write_variable(raw::slice_as_bytes(slice))
+        let pos = self.variable_size();
+        self.write_variable_unaligned(raw::slice_as_bytes(slice))?;
+        Ok(pos)
     }
 
     /// Return the number of bytes that have been written to the variable-length
@@ -88,25 +91,31 @@ pub trait Serialize {
     type Form;
 
     /// Serialize a single `Self` value.
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error>;
+    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error>;
 
-    /// Serialize a `[Self]` slice. This can be overridden by implementations for types
-    /// that can written as a single block.
-    fn write_slice<S: Serializer>(this: &[Self], serializer: &mut S) -> Result<(), S::Error>
+    /// Serialize a `[Self]` slice in the `Seq` form.
+    ///
+    /// The `Seq` serialization form is a `usize`, followed by that many
+    /// elements, each preceded by padding as needed for alignment.
+    ///
+    /// The default definition of this function simply uses a loop to write out
+    /// each element. Implementations for types that can be written as a single
+    /// block should override this to do so.
+    fn write_seq<S: Serializer>(this: &[Self], serializer: &mut S) -> Result<usize, S::Error>
     where
         Self: Sized,
     {
-        serializer.write_aligned_slice(&[this.len()])?;
+        let pos = serializer.write_variable_aligned(&[this.len()])?;
         for elt in this {
             elt.write(serializer)?;
         }
-        Ok(())
+        Ok(pos)
     }
 }
 
 impl<T: Serialize + ?Sized> Serialize for &T {
     type Form = T::Form;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
         (*self).write(serializer)
     }
 }
@@ -115,8 +124,8 @@ impl<T: Serialize> Serialize for [T]
     where T::Form: Sized
 {
     type Form = Seq<T::Form>;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
-        <T as Serialize>::write_slice(self, serializer)
+    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
+        <T as Serialize>::write_seq(self, serializer)
     }
 }
 
@@ -124,14 +133,14 @@ impl<T: Serialize> Serialize for Vec<T>
     where T::Form: Sized
 {
     type Form = Seq<T::Form>;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
-        <T as Serialize>::write_slice(self, serializer)
+    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
+        <T as Serialize>::write_seq(self, serializer)
     }
 }
 
 impl Serialize for str {
     type Form = Str;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
+    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
         self.as_bytes().write(serializer)
     }
 }
@@ -200,15 +209,15 @@ macro_rules! simply_serialized_types {
             impl Serialize for $type {
                 type Form = $type;
 
-                fn write<S: Serializer>(&self, serializer: &mut S) -> Result<(), S::Error> {
-                    serializer.write_variable(raw::as_bytes(self))
+                fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
+                    serializer.write_variable_aligned(std::slice::from_ref(self))
                 }
 
                 /// For these types, we can write out the whole block at once.
-                fn write_slice<S: Serializer>(this: &[Self], serializer: &mut S) -> Result<(), S::Error> {
-                    serializer.write_aligned_slice(&[this.len()])?;
-                    serializer.write_aligned_slice(this)?;
-                    Ok(())
+                fn write_seq<S: Serializer>(this: &[Self], serializer: &mut S) -> Result<usize, S::Error> {
+                    let pos = serializer.write_variable_aligned(&[this.len()])?;
+                    serializer.write_variable_aligned(this)?;
+                    Ok(pos)
                 }
             }
 

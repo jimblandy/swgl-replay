@@ -128,6 +128,7 @@ macro_rules! general {
             $inner_recorder .serializer.flush()
                 .expect("gl-replay serialization failure");
 
+            $inner_recorder .serial += 1;
             $returned
         }
     }

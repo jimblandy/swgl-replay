@@ -51,6 +51,7 @@ pub struct Recorder<G, S> {
 
 pub(crate) struct InnerRecorder<S> {
     serializer: S,
+    serial: usize,
 }
 
 impl<G, S> Recorder<G, S> {
@@ -95,7 +96,7 @@ impl<G, S> Recorder<G, S> {
 
 impl<S> InnerRecorder<S> {
     fn new(serializer: S) -> InnerRecorder<S> {
-        InnerRecorder { serializer }
+        InnerRecorder { serializer, serial: 0 }
     }
 }
 
@@ -108,9 +109,7 @@ impl<S: Serializer> InnerRecorder<S> {
         &mut self,
         var: &T,
     ) -> Result<usize, S::Error> {
-        let ident = self.serializer.variable_size();
-        var.write(&mut self.serializer)?;
-        Ok(ident)
+        var.write(&mut self.serializer)
     }
 }
 

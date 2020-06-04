@@ -40,7 +40,7 @@ fn main() -> io::Result<()> {
         let mut buf = CallBuffer {
             bytes: [0; mem::size_of::<Call>()],
         };
-        loop {
+        for i in 0.. {
             match file.read_exact(unsafe { &mut buf.bytes }) {
                 Err(e) => {
                     if e.kind() == io::ErrorKind::UnexpectedEof {
@@ -52,7 +52,7 @@ fn main() -> io::Result<()> {
             };
 
             let call = unsafe { buf.call };
-            println!("{:?}", call);
+            println!("{:4} {:?}", i, call);
         }
     }
 
