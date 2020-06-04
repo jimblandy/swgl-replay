@@ -88,8 +88,8 @@ impl Serializer for Files {
 
 /// A recording of GL calls, created with `Recorder`.
 pub struct Recording {
-    pub(crate) calls: Vec<Call>,
-    pub(crate) variable: Vec<u8>,
+    pub calls: Vec<Call>,
+    pub variable: Vec<u8>,
 }
 
 /// Read the remaining contents of `file` directly into memory as a `Vec<T>`.

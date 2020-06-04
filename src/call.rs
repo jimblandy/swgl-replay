@@ -6,6 +6,16 @@ use gleam::gl::{
 
 use crate::forms::{Var, Seq, Str};
 
+/// An enum representing all possible `Gl` trait method calls.
+///
+/// This enum has a variant for each method of `Gl` that holds the arguments
+/// passed to the method, and in some cases the return value.
+///
+/// Some argument types aren't stored directly in the `Call` variant. For
+/// example, a `&[u8]` argument has its length and bytes written to a separate
+/// data stream, and then the `Call` variant stores a `Var<Seq<u8>>` value,
+/// where the `Var` holds the offset at which the length and bytes were written
+/// in the other data stream.
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug)]
 #[rustfmt::skip]

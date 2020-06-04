@@ -2,11 +2,11 @@
 //!
 //! This module defines simplified variants of the serde serialization and
 //! deserialization traits that permit a bit more zero-copy access (and thus,
-//! hopefully, a bit less overhead). Serde will only borrow `str` and `[u8]`
-//! directly out of the serialized data, whereas this module's traits will also
-//! borrow `[GLfloat]` and things like that. Also, the breadth of types needed
-//! to record a `Gl` session are pretty limited, so we can avoid some of serde's
-//! complications.
+//! hopefully, impose a bit less overhead). Serde will only borrow `str` and
+//! `[u8]` directly out of the serialized data, whereas this module's traits
+//! will also borrow `[GLfloat]` and things like that. Also, the breadth of
+//! types needed to record a `Gl` session are pretty limited, so we can avoid
+//! some of serde's complications.
 //!
 //! A GL recording includes two streams of serialized data:
 //!

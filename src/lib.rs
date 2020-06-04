@@ -1,23 +1,31 @@
 //! Record and replay for [`gleam::Gl`] implementations.
 //!
-//! This crate provides a wrapper around an OpenGL context that records the
-//! series of method calls it receives to a set of files on disk. Then, the
-//! recording can be replayed against another OpenGL context later, for
+//! This crate provides a wrapper around an OpenGL context that records all the
+//! method calls performed on it and writes them to a set of files on disk. This
+//! recording can then be replayed against another OpenGL context later, for
 //! debugging or benchmarking.
 //!
 //! Specifically, this crate's [`Recorder`] type implements the [`gleam`]
-//! crate's [`Gl`] trait, by wrapping some other `Gl` implementation that you
-//! provide. Details of all the method calls performed on the `Recorder` are
-//! written to the filesystem.
+//! crate's [`Gl`] trait by wrapping some other `Gl` implementation that you
+//! provide, and logging details of all the method calls performed on the
+//! `Recorder` to the filesystem.
 //!
-//! A `Replayer` value refers to one of these saved recordings on the
-//! filesystem. You can pass a `Gl` implementation to a `Recording`, and have it
-//! perform the same series of method calls on it as before.
+//! Then, the `replay` function takes a reference to the contents of a saved
+//! recording, and performs the same series of calls on a new `Gl`
+//! implementation you provide.
 //!
 //! On the filesystem, a recording is actually a directory, containing a number
 //! of files. The `calls` file holds an array of fixed-size entries describing
 //! the method calls, and the `large` file holds values that were too large to
 //! include in the array.
+//!
+//! You can combine this crates' recordings with other events of your choice.
+//! The `Recorder` type can use any implementation of the `Serializer` trait to
+//! record calls, so you can provide your own `Serializer` implementation that
+//! combines the `Gl` calls with your own data. Then, at replay time, there is a
+//! `replay_one` function that replays a single `Gl` call, which you can use
+//! from your own replay loop. This crate also exposes simple `Serializer` and
+//! `Deserializer` traits which you can use if they meet your needs.
 //!
 //! [`gleam`]: https://crates.io/crates/gleam
 //! [`gleam::Gl`]: https://docs.rs/gleam/0.11.0/gleam/gl/trait.Gl.html
@@ -32,17 +40,16 @@ use std::{io, sync};
 
 mod call;
 mod files;
-mod forms;
+pub mod forms;
 mod raw;
 mod recorder_gl;
 mod replay;
 mod serialize;
 
 pub use call::Call;
-pub use forms::{Var, Seq};
 pub use files::{Files, Recording};
-pub use replay::replay;
-pub use serialize::{Serialize, Serializer};
+pub use replay::{replay, replay_one};
+pub use serialize::{Deserialize, DeserializeError, Serialize, Serializer};
 
 pub struct Recorder<G, S> {
     inner_gl: G,
@@ -101,7 +108,7 @@ impl<S> InnerRecorder<S> {
 }
 
 impl<S: Serializer> InnerRecorder<S> {
-    pub(crate) fn write_call(&mut self, call: &call::Call) -> Result<(), S::Error> {
+    pub(crate) fn write_call(&mut self, call: &Call) -> Result<(), S::Error> {
         self.serializer.write_call(call)
     }
 
