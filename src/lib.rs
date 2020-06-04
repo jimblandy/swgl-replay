@@ -41,7 +41,7 @@ use std::{io, sync};
 mod call;
 mod files;
 pub mod forms;
-mod raw;
+pub mod raw;
 mod recorder_gl;
 mod replay;
 mod serialize;
