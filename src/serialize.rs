@@ -43,16 +43,12 @@
 
 use std::mem;
 
-use crate::call;
 use crate::forms::{Seq, Str};
 use crate::raw;
 
 /// A trait for types that can serialize GL method call streams.
 pub trait Serializer {
     type Error: std::error::Error;
-
-    /// Write the method call `call` to the `Call` stream.
-    fn write_call(&mut self, call: &call::Call) -> Result<(), Self::Error>;
 
     /// Write the contents of the buffer `buf` to the variable-length data
     /// stream.
@@ -86,64 +82,6 @@ pub trait Serializer {
 }
 
 /// A type that can be serialized to a Serializer.
-pub trait Serialize {
-    /// The form in which `Self` values are serialized.
-    type Form;
-
-    /// Serialize a single `Self` value.
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error>;
-
-    /// Serialize a `[Self]` slice in the `Seq` form.
-    ///
-    /// The `Seq` serialization form is a `usize`, followed by that many
-    /// elements, each preceded by padding as needed for alignment.
-    ///
-    /// The default definition of this function simply uses a loop to write out
-    /// each element. Implementations for types that can be written as a single
-    /// block should override this to do so.
-    fn write_seq<S: Serializer>(this: &[Self], serializer: &mut S) -> Result<usize, S::Error>
-    where
-        Self: Sized,
-    {
-        let pos = serializer.write_variable_aligned(&[this.len()])?;
-        for elt in this {
-            elt.write(serializer)?;
-        }
-        Ok(pos)
-    }
-}
-
-impl<T: Serialize + ?Sized> Serialize for &T {
-    type Form = T::Form;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
-        (*self).write(serializer)
-    }
-}
-
-impl<T: Serialize> Serialize for [T]
-    where T::Form: Sized
-{
-    type Form = Seq<T::Form>;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
-        <T as Serialize>::write_seq(self, serializer)
-    }
-}
-
-impl<T: Serialize> Serialize for Vec<T>
-    where T::Form: Sized
-{
-    type Form = Seq<T::Form>;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
-        <T as Serialize>::write_seq(self, serializer)
-    }
-}
-
-impl Serialize for str {
-    type Form = Str;
-    fn write<S: Serializer>(&self, serializer: &mut S) -> Result<usize, S::Error> {
-        self.as_bytes().write(serializer)
-    }
-}
 
 /// A type that can be deserialized from a block of bytes.
 pub trait Deserialize<'b>: Sized {
@@ -175,34 +113,6 @@ impl<'b> Deserialize<'b> for &'b str {
     }
 }
 
-/// Borrow a `&[T]` slice from `buf`, respecting `T`'s alignment requirements.
-///
-/// Skip bytes from the front of `buf` until it is aligned as required to hold a
-/// `T` value. Return a slice of `count` values of type `T`, and advance `buf`
-/// to the next byte.
-///
-/// Return an `DeserializeError` if `buf` is not large enough to hold the aligned
-/// slice.
-fn take_slice<'b, T: Copy + 'static>(
-    buf: &mut &'b [u8],
-    count: usize,
-) -> Result<&'b [T], DeserializeError> {
-    let size: usize = mem::size_of::<T>();
-    let align: usize = mem::align_of::<T>();
-
-    let align_skip = (0 - buf.as_ptr() as usize) & (align - 1);
-    let full_len = align_skip + size * count;
-    if buf.len() < full_len {
-        return Err(DeserializeError::UnexpectedEof);
-    }
-
-    let slice =
-        unsafe { std::slice::from_raw_parts(buf[align_skip..].as_ptr() as *const T, count) };
-
-    *buf = &buf[full_len..];
-    Ok(slice)
-}
-
 macro_rules! simply_serialized_types {
     ( $( $type:ty ),* ) => {
         $(
@@ -232,24 +142,3 @@ macro_rules! simply_serialized_types {
 
 // These types are serialized in variable content as themselves.
 simply_serialized_types!(bool, u8, u32, i32, f32, f64, usize);
-
-#[derive(Debug, Clone)]
-pub enum DeserializeError {
-    UnexpectedEof,
-    BadUTF8,
-}
-
-impl std::fmt::Display for DeserializeError {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        fmt.write_str(match self {
-            DeserializeError::UnexpectedEof => {
-                "serialized OpenGL method call argument data truncated"
-            }
-            DeserializeError::BadUTF8 => {
-                "serialized OpenGL method call argument data included bad UTF-8"
-            }
-        })
-    }
-}
-
-impl std::error::Error for DeserializeError {}

@@ -1,9 +1,11 @@
 use docopt::Docopt;
 use serde::Deserialize;
-use std::io::prelude::*;
-use std::{fs, io, mem, path};
+use std::io;
 
-use gl_replay::{Call, Recording};
+use gl_replay::FileRecording;
+use gl_replay::Call;
+
+type Recording = FileRecording<Call>;
 
 const USAGE: &'static str = "
 Dump gl-replay command log.
@@ -23,35 +25,15 @@ fn main() -> io::Result<()> {
         .unwrap_or_else(|e| e.exit());
 
     for dir in &args.arg_dir {
-        let mut file = io::BufReader::new(fs::File::open(path::Path::new(dir).join("calls"))?);
-
-        let mut header = [0_u8; 8];
-        file.read_exact(&mut header)?;
-        if let Err(err) = Recording::check_header(&header) {
-            eprintln!("{}: {}", err, dir);
-            continue;
-        }
-
-        union CallBuffer {
-            bytes: [u8; mem::size_of::<Call>()],
-            call: Call,
+        let recording = match Recording::open(dir) {
+            Err(err) => {
+                eprintln!("{}: {}", err, dir);
+                continue;
+            }
+            Ok(recording) => recording,
         };
 
-        let mut buf = CallBuffer {
-            bytes: [0; mem::size_of::<Call>()],
-        };
-        for i in 0.. {
-            match file.read_exact(unsafe { &mut buf.bytes }) {
-                Err(e) => {
-                    if e.kind() == io::ErrorKind::UnexpectedEof {
-                        break;
-                    }
-                    return Err(e);
-                }
-                Ok(()) => (),
-            };
-
-            let call = unsafe { buf.call };
+        for (i, call) in recording.calls.iter().enumerate() {
             println!("{:4} {:?}", i, call);
         }
     }

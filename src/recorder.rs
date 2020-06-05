@@ -1,36 +1,62 @@
 //! Implementation of `Gl` trait for `Recorder`.
 
 use gleam::gl::*;
-use std::ops::Deref;
 use std::os::raw::{c_int, c_void};
 
-use super::{InnerRecorder, Recorder, Serialize, Serializer};
 use crate::call::Call;
-use crate::forms::Var;
+use crate::form::{Var, Seq, Str};
+use crate::var::{CallStream, Serialize, Stream};
 
+/// A type that can record a `Gl` method call stream.
+pub trait Record {
+    type GlImpl: Gl;
+    type CallStreamImpl: CallStream<Call>;
+
+    /// Return this `Recorder`'s OpenGL implementation.
+    fn as_gl(&self) -> &Self::GlImpl;
+
+    /// Obtain this `Recorder`'s `CallStream` implementation.
+    ///
+    /// Since this takes `&self` but returns `&mut CallStreamImpl`,
+    /// implementations will probably need a `Mutex` or a `RefCell` somewhere.
+    fn as_call_stream(&self) -> &mut Self::CallStreamImpl;
+}
+
+/// An implementation of `Gl` that records all method calls, given an
+/// implementation of `Record` that does all the actual work.
+///
+/// This is an olive branch offered to Rust's orphan impl rules.
+pub struct Recorder<R: Record>(R);
 
 /// A `Gl` method argument type.
 ///
-/// Some argument types we can include directly in the `Call`, like `f32`.
-/// Others we need to serialize out into the variable-length data section, and
-/// let the `Call` hold the value's offset there. The `Parameter` implementation
-/// determines which strategy we use.
+/// There are two ways we can record the value of a `Gl` method argument:
+///
+/// - An argument type like `bool` or `f32` we can include directly in the `Call`.
+///
+/// - An argument type like `&[u8]` and `&str` we must serialize out into the
+///   variable-length data section, and save its offset in a `Var` that we let
+///   represent the value in the `Call`.
+///
+/// The argument type's `Parameter` implementation determines which strategy we
+/// use.
 trait Parameter {
     type Form;
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
-    where
-        S: Serializer;
+    /// If `&self` is the actual value of the parameter passed to the `Gl`
+    /// method, return the value that should represent it in the `Call`,
+    /// serializing any side data to `stream`.
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error>;
 }
 
-macro_rules! direct_parameter_types {
-    ( $( $type:ty ),* ) => {
+/// `Simple` types, in the `var` module's sense, are included directly in the
+/// `Call`, and don't need to be written to the variable-length stream.
+macro_rules! direct_parameters {
+    ( $( $type:ty ),*) => {
         $(
             impl Parameter for $type {
-                type Form = Self;
-                fn to_call<S>(&self, _inner_recorder: &mut InnerRecorder<S>) -> Result<Self, S::Error>
-                where S: Serializer
-                {
+                type Form = $type;
+                fn to_call<S: Stream>(&self, _stream: &mut S) -> Result<Self, S::Error> {
                     Ok(*self)
                 }
             }
@@ -38,59 +64,63 @@ macro_rules! direct_parameter_types {
     }
 }
 
-// These types appear as themselves in `Call`. This covers `GLenum`, `GLint`,
-// and friends.
-direct_parameter_types!(bool, u32, i32, u64, i64, f32, f64, usize);
+direct_parameters!(u8, u16, u32, u64, u128, usize,
+                   i8, i16, i32, i64, i128, isize,
+                   f32, f64,
+                   char, bool);
 
-macro_rules! sequence_parameter_types {
-    ( $( ( $( $quantifier:tt )* ) $type:ty ),* ) => {
-        $(
-            impl $( $quantifier )* Parameter for $type {
-                type Form = Var<<Self as Serialize>::Form>;
+impl<T: Serialize> Parameter for [T] {
+    type Form = Var<Seq<T::Form>>;
 
-                fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
-                where S: Serializer
-                {
-                    inner_recorder.write_variable(self).map(Var::new)
-                }
-            }
-        )*
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+        Ok(Var::new(self.serialize(stream)?))
     }
 }
 
-// The following types are serialized as sequences, and represented by a
-// `Var<Seq<...>>` in the `Call`.
-sequence_parameter_types!(() str, (<T: Serialize>) Vec<T>, (<T: Serialize>) [T]);
+impl<T: Serialize> Parameter for Vec<T> {
+    type Form = Var<Seq<T::Form>>;
 
-macro_rules! transparent_parameter_types {
-    ( $( $type:ty ),* ) => {
-        $(
-            impl<T: Parameter + ?Sized> Parameter for $type {
-                type Form = T::Form;
-
-                fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
-                where S: Serializer
-                {
-                    (**self).to_call(inner_recorder)
-                }
-            }
-        )*
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+        Ok(Var::new(self.serialize(stream)?))
     }
 }
 
-// The following type constructors `C<T>` are serialized transparently, just like `T`.
-transparent_parameter_types!(&T, &mut T);
+impl Parameter for str {
+    type Form = Var<Str>;
 
-/// We serialize `Option<T>` as a `T` if it is `Some`.
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+        Ok(Var::new(self.serialize(stream)?))
+    }
+}
+
+/// A parameter of type `&T` is passed just as a parameter of type `T`.
+impl<T: Parameter + ?Sized> Parameter for &T {
+    type Form = T::Form;
+
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+        (**self).to_call(stream)
+    }
+}
+
+/// A parameter of type `&mut T` is passed just as a parameter of type `T`.
+/// Although, these are usually out-parameters, so we should record their values
+/// *after* the call, not before.
+impl<T: Parameter + ?Sized> Parameter for &mut T {
+    type Form = T::Form;
+
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+        (**self).to_call(stream)
+    }
+}
+
+/// We pass `Option<T>` as `None` if it is `None`, or `Some(f)` if it is `Some(v)`,
+/// where we would pass `v` as `f`.
 impl<T: Parameter> Parameter for Option<T> {
     type Form = Option<T::Form>;
 
-    fn to_call<S>(&self, inner_recorder: &mut InnerRecorder<S>) -> Result<Self::Form, S::Error>
-    where
-        S: Serializer,
-    {
+    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
         self.as_ref()
-            .map(|param| param.to_call(inner_recorder))
+            .map(|param| param.to_call(stream))
             .transpose() // from `Option<Result>` to `Result<Option>`
     }
 }
@@ -106,7 +136,7 @@ macro_rules! check {
 macro_rules! no_side_effect {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         {
-            $self .inner_gl. $method ( $( $arg ),* )
+            $self .0.as_gl(). $method ( $( $arg ),* )
         }
     }
 }
@@ -115,20 +145,19 @@ macro_rules! no_side_effect {
 macro_rules! general {
     (
         let $returned:ident = $self:ident . $method:ident ( $( $arg:ident ),* );
-        lock $inner_recorder:ident;
+        lock $call_stream:ident;
         $body:expr
     ) => {
         {
-            let $returned = $self .inner_gl. $method ( $( $arg ),* );
-            let mut $inner_recorder = $self .inner_recorder.lock().unwrap();
+            let $returned = $self .0.as_gl(). $method ( $( $arg ),* );
+            let $call_stream = $self .0.as_call_stream();
 
             $body;
 
             // For debugging.
-            $inner_recorder .serializer.flush()
+            $call_stream .flush()
                 .expect("gl-replay serialization failure");
 
-            $inner_recorder .serial += 1;
             $returned
         }
     }
@@ -138,15 +167,15 @@ macro_rules! simple {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         general! {
             let returned = $self . $method ( $( $arg ),* );
-            lock inner_recorder;
+            lock call_stream;
             {
                 let call = Call:: $method {
                     $(
-                        $arg : check!($arg .to_call(&mut inner_recorder))
+                        $arg : check!($arg .to_call(call_stream))
                     ),*
                 };
 
-                check!(inner_recorder.write_call(&call));
+                check!(call_stream.write_call(&call));
             }
         }
     }
@@ -156,10 +185,10 @@ macro_rules! simple_with_return_value {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         general! {
             let returned = $self . $method ( $( $arg ),* );
-            lock inner_recorder;
+            lock call_stream;
             {
-                let returned_for_call = check!(returned.to_call(&mut inner_recorder));
-                check!(inner_recorder.write_call(&Call::$method {
+                let returned_for_call = check!(returned.to_call(call_stream));
+                check!(call_stream.write_call(&Call::$method {
                     $( $arg, )*
                     returned: returned_for_call
                 }));
@@ -169,12 +198,7 @@ macro_rules! simple_with_return_value {
 }
 
 #[allow(unused_variables)]
-impl<G, S> gleam::gl::Gl for Recorder<G, S>
-where
-    G: Deref,
-    G::Target: Gl,
-    S: Serializer,
-{
+impl<R: Record> gleam::gl::Gl for Recorder<R> {
     fn get_type(&self) -> GlType {
         no_side_effect!(self.get_type())
     }
@@ -188,17 +212,17 @@ where
     ) {
         general! {
             let returned = self.buffer_data_untyped(target, size, data, usage);
-            lock inner_recorder;
+            lock call_stream;
             {
                 let size_data = unsafe {
                     std::slice::from_raw_parts(data as *const u8, size as usize)
                 };
                 let call = Call::buffer_data_untyped {
                     target,
-                    size_data: check!(size_data.to_call(&mut inner_recorder)),
+                    size_data: check!(size_data.to_call(call_stream)),
                     usage,
                 };
-                check!(inner_recorder.write_call(&call));
+                check!(call_stream.write_call(&call));
             }
         }
     }

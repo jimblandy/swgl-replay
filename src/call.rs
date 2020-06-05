@@ -4,7 +4,10 @@ use gleam::gl::{
     GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLuint,
 };
 
-use crate::forms::{Var, Seq, Str};
+use crate::form::{Var, Seq, Str};
+use crate::raw;
+
+unsafe impl raw::Simple for Call { }
 
 /// An enum representing all possible `Gl` trait method calls.
 ///
