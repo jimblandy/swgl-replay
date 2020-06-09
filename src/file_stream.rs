@@ -8,7 +8,7 @@ use std::{fs, io, mem};
 use crate::raw::{self, Simple};
 use crate::var::{CallStream, Stream};
 
-/// A `CallStream` that writes the OpenGL calls to files on disk.
+/// A `CallStream` implementation that writes the OpenGL calls to files on disk.
 pub struct FileStream<Call> {
     calls: io::BufWriter<fs::File>,
     variable: io::BufWriter<fs::File>,

@@ -34,14 +34,17 @@
 //! [`Replayer`]: struct.Replayer.html
 
 mod call;
+pub use call::Call;
+
 mod file_stream;
+pub use file_stream::{FileStream, FileRecording};
+
 pub mod form;
 mod recorder;
 pub mod raw;
 pub mod var;
 
-pub use call::Call;
-pub use file_stream::{FileStream, FileRecording};
+
 
 //mod replay;
 //pub use replay::{replay, replay_one};

@@ -1,15 +1,19 @@
 //! Serialization for variable-length values, zero-copy when possible.
 //!
-//! This module defines simplified variants of the serde serialization and
-//! deserialization traits that permit a bit more zero-copy access (and thus,
-//! hopefully, impose a bit less overhead). Serde will only borrow `str` and
-//! `[u8]` directly out of the serialized data, whereas this module's traits
-//! will also borrow `[GLfloat]` and things like that. Also, the breadth of
-//! types needed to record a `Gl` session are pretty limited, so we can avoid
-//! some of serde's complications.
+//! This module defines serialization and deserialization traits that permit a
+//! bit more zero-copy access (and thus, hopefully, impose a bit less overhead).
+//! Serde will only borrow `str` and `[u8]` directly out of the serialized data,
+//! whereas this module's traits will also borrow `[GLfloat]` and things like
+//! that.
 //!
-//! Simple `Copy + 'static` types like `f32` or `usize` are serialized as their
-//! in-memory form, preceded by padding bytes as needed for alignment.
+//! Fortunately, the breadth of types needed to record the sorts of sessions we
+//! care about are pretty limited, so this module's traits can be much simpler
+//! than serde's.
+//!
+//! Providing zero-copy access to types like `f32` entails serializing them in
+//! their in-memory form, and ensuring proper alignment. This means that
+//! recordings are specific to a particular endianness, word size, and
+//! alignment.
 //!
 //! Array slices and vectors are serialized as a `usize`, followed by the
 //! serialized forms of the elements. The `usize` and the elements are each
@@ -67,6 +71,10 @@ pub trait Stream {
 }
 
 /// An extension of `Stream` which can also build an array of `Call` values.
+///
+/// Note that `Call` here is a generic type parameter: this trait is not
+/// specific to OpenGL calls or gleam. You can use this to record any stream of
+/// calls for which you've prepared an enum type like this crate's `call::Call`.
 ///
 /// Values written to `write_call` should be stored in a way that lets us obtain
 /// a `&[Call]` slice from the data, with no per-element serialization needed.
