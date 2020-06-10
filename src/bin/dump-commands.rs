@@ -25,7 +25,7 @@ fn main() -> io::Result<()> {
         .unwrap_or_else(|e| e.exit());
 
     for dir in &args.arg_dir {
-        let recording = match Recording::open(dir) {
+        let recording = match Recording::open(dir, gl_replay::GL_MAGIC) {
             Err(err) => {
                 eprintln!("{}: {}", err, dir);
                 continue;

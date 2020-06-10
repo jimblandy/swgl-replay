@@ -33,6 +33,10 @@
 //! [`Recorder`]: struct.Recorder.html
 //! [`Replayer`]: struct.Replayer.html
 
+use gleam::gl;
+use std::io;
+use std::path::Path;
+
 mod call;
 pub use call::Call;
 
@@ -41,10 +45,25 @@ pub use file_stream::{FileStream, FileRecording};
 
 pub mod form;
 mod recorder;
+pub use recorder::Recorder;
+
 pub mod raw;
 pub mod var;
 
-
-
 //mod replay;
 //pub use replay::{replay, replay_one};
+
+/// A `gleam::Gl` implementation that records calls to files.
+type FileRecorder<G> = Recorder<G, FileStream<Call>>;
+
+impl<G: gl::Gl> FileRecorder<G> {
+    /// Create a new `gleam::Gl` recorder that logs all method cals on
+    /// `inner_gl` to a recording saved as a directory named `dir`.
+    pub fn create<P: AsRef<Path>>(inner_gl: G, dir: P) -> io::Result<FileRecorder<G>> {
+        let file_stream = FileStream::create(dir, GL_MAGIC)?;
+        Ok(FileRecorder::new(inner_gl, file_stream))
+    }
+}
+
+/// The magic number used to identify `gleam::Gl` file recordings.
+pub const GL_MAGIC: u32 = (((b'G' as u32) << 8 | (b'L' as u32)) << 8 | (b'R' as u32)) << 8 | (b'R' as u32);

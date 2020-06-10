@@ -18,7 +18,7 @@ pub struct FileStream<Call> {
 }
 
 impl<Call: Simple> FileStream<Call> {
-    pub fn create<P: AsRef<Path>>(dir: P) -> io::Result<FileStream<Call>> {
+    pub fn create<P: AsRef<Path>>(dir: P, magic: u32) -> io::Result<FileStream<Call>> {
         let dir = dir.as_ref();
 
         match fs::create_dir(dir) {
@@ -32,7 +32,7 @@ impl<Call: Simple> FileStream<Call> {
         let variable = io::BufWriter::new(fs::File::create(dir.join("variable"))?);
 
         // Write a header to the file.
-        calls.write_all(raw::as_bytes(&Header::for_call::<Call>()))?;
+        calls.write_all(raw::as_bytes(&Header::for_call::<Call>(magic)))?;
 
         Ok(FileStream {
             calls,
@@ -65,10 +65,14 @@ impl<Call> Stream for FileStream<Call> {
     }
 }
 
-impl<Call: Simple> CallStream<Call> for FileStream<Call> {
-    fn write_call(&mut self, call: &Call) -> Result<usize, Self::Error> {
+impl<Stored, Passed> CallStream<Passed> for FileStream<Stored>
+    where Stored: Simple,
+          Passed: Into<Stored>
+{
+    fn write_call(&mut self, call: Passed) -> Result<usize, Self::Error> {
+        let call = call.into();
         let n = self.call_serial;
-        self.calls.write_all(raw::as_bytes(call))?;
+        self.calls.write_all(raw::as_bytes(&call))?;
         self.call_serial += 1;
         Ok(n)
     }
@@ -133,7 +137,7 @@ fn read_vector<T: Simple>(
 }
 
 impl<Call: Simple> FileRecording<Call> {
-    pub fn open<P: AsRef<Path>>(dir: P) -> io::Result<FileRecording<Call>> {
+    pub fn open<P: AsRef<Path>>(dir: P, magic: u32) -> io::Result<FileRecording<Call>> {
         let dir = dir.as_ref();
         let mut calls_file = fs::File::open(dir.join("calls"))?;
         let variable_file = fs::File::open(dir.join("variable"))?;
@@ -151,7 +155,7 @@ impl<Call: Simple> FileRecording<Call> {
             // behavior.
             raw::slice_as_bytes_mut(std::slice::from_mut(&mut header))
         })?;
-        header.check::<Call>()?;
+        header.check::<Call>(magic)?;
 
         let alignment = max_alignment::<Call>();
         Ok(FileRecording {
@@ -164,6 +168,8 @@ impl<Call: Simple> FileRecording<Call> {
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(packed)]
 struct Header {
+    // Using a `u32` here ensures we get different magic numbers on big-endian
+    // and little-endian machines.
     magic: u32,
     size_of_usize: u8,
     size_of_call: u8,
@@ -172,8 +178,6 @@ struct Header {
 }
 
 unsafe impl Simple for Header { }
-
-pub const MAGIC: u32 = (((b'G' as u32) << 8 | (b'L' as u32)) << 8 | (b'R' as u32)) << 8 | (b'R' as u32);
 
 fn max_alignment<Call: Copy>() -> usize {
     // A type whose alignment is as strict as we need. Add more types to
@@ -188,11 +192,16 @@ fn max_alignment<Call: Copy>() -> usize {
 }
 
 impl Header {
-    fn for_call<Call: Simple>() -> Header {
-        assert_eq!(mem::size_of::<Header>(), 8);
+    fn for_call<Call: Simple>(magic: u32) -> Header {
+        // The header had better not cause the content to be misaligned.
+        assert!(mem::size_of::<Header>() % max_alignment::<Call>() == 0);
+
+        // The properties we want to stick into the header had better actually
+        // fit in a single byte.
         assert!(mem::size_of::<Call>() <= 255);
+
         Header {
-            magic: MAGIC,
+            magic,
             size_of_usize: mem::size_of::<usize>() as u8,
             size_of_call: mem::size_of::<Call>() as u8,
             max_alignment: max_alignment::<Call>() as u8,
@@ -210,8 +219,8 @@ impl Header {
         }
     }
 
-    fn check<Call: Simple>(&self) -> io::Result<()> {
-        let mut expected = Header::for_call::<Call>();
+    fn check<Call: Simple>(&self, magic: u32) -> io::Result<()> {
+        let mut expected = Header::for_call::<Call>(magic);
         expected.padding = self.padding;
         if expected != *self {
             let msg = format!("gl-replay header does not match:\n\

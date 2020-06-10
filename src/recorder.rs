@@ -1,34 +1,28 @@
 //! Implementation of `Gl` trait for `Recorder`.
 
-use gleam::gl::Gl;
-use crate::call::Call;
-use crate::var::CallStream;
+use std::sync;
 
 mod impl_gl;
 mod parameter;
 
-/// A trait for types that can record a `Gl` method call stream.
-///
-/// 
-/// Usually, it's not enough to just record `Gl` calls: you have to also capture
-/// other peripheral operations that affect the OpenGL implementation you want to
-/// drive. 
-pub trait Record {
-    type GlImpl: Gl;
-    type CallStreamImpl: CallStream<Call>;
+/// An implementation of `gleam::Gl` that records method calls for later replay.
+pub struct Recorder<G, Cs> {
+    /// The Gl implementation calls to which we are recording.
+    inner_gl: G,
 
-    /// Return this `Recorder`'s OpenGL implementation.
-    fn as_gl(&self) -> &Self::GlImpl;
-
-    /// Obtain this `Recorder`'s `CallStream` implementation.
-    ///
-    /// Since this takes `&self` but returns `&mut CallStreamImpl`,
-    /// implementations will probably need a `Mutex` or a `RefCell` somewhere.
-    fn as_call_stream(&self) -> &mut Self::CallStreamImpl;
+    /// The CallStream to which we record calls to `inner_gl`.
+    call_stream: sync::Mutex<Cs>,
 }
 
-/// An implementation of `Gl` that records all method calls, given an
-/// implementation of `Record` that does all the actual work.
-///
-/// This is an olive branch offered to Rust's orphan impl rules.
-pub struct Recorder<R: Record>(R);
+impl<G, Cs> Recorder<G, Cs> {
+    pub fn new(inner_gl: G, call_stream: Cs) -> Recorder<G, Cs> {
+        Recorder {
+            inner_gl,
+            call_stream: sync::Mutex::new(call_stream)
+        }
+    }
+
+    pub fn inner_gl(&self) -> &G {
+        &self.inner_gl
+    }
+}

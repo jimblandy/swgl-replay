@@ -4,8 +4,8 @@ use gleam::gl::*;
 use std::os::raw::{c_int, c_void};
 
 use crate::call::Call;
-use crate::var::{CallStream, Stream};
-use super::{Record, Recorder};
+use crate::var::CallStream;
+use super::Recorder;
 use super::parameter::Parameter;
 
 macro_rules! check {
@@ -19,7 +19,7 @@ macro_rules! check {
 macro_rules! no_side_effect {
     ($self:ident . $method:ident ( $( $arg:ident ),* )) => {
         {
-            $self .0.as_gl(). $method ( $( $arg ),* )
+            $self .inner_gl. $method ( $( $arg ),* )
         }
     }
 }
@@ -32,8 +32,8 @@ macro_rules! general {
         $body:expr
     ) => {
         {
-            let $returned = $self .0.as_gl(). $method ( $( $arg ),* );
-            let $call_stream = $self .0.as_call_stream();
+            let $returned = $self .inner_gl. $method ( $( $arg ),* );
+            let $call_stream = &mut *$self .call_stream.lock().unwrap();
 
             $body;
 
@@ -58,7 +58,7 @@ macro_rules! simple {
                     ),*
                 };
 
-                check!(call_stream.write_call(&call));
+                check!(call_stream.write_call(call));
             }
         }
     }
@@ -71,7 +71,7 @@ macro_rules! simple_with_return_value {
             lock call_stream;
             {
                 let returned_for_call = check!(returned.to_call(call_stream));
-                check!(call_stream.write_call(&Call::$method {
+                check!(call_stream.write_call(Call::$method {
                     $( $arg, )*
                     returned: returned_for_call
                 }));
@@ -81,7 +81,10 @@ macro_rules! simple_with_return_value {
 }
 
 #[allow(unused_variables)]
-impl<R: Record> gleam::gl::Gl for Recorder<R> {
+impl<G, Cs> gleam::gl::Gl for Recorder<G, Cs>
+    where G: Gl,
+          Cs: CallStream<Call>
+{
     fn get_type(&self) -> GlType {
         no_side_effect!(self.get_type())
     }
@@ -105,7 +108,7 @@ impl<R: Record> gleam::gl::Gl for Recorder<R> {
                     size_data: check!(size_data.to_call(call_stream)),
                     usage,
                 };
-                check!(call_stream.write_call(&call));
+                check!(call_stream.write_call(call));
             }
         }
     }

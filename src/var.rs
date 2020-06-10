@@ -83,7 +83,7 @@ pub trait Stream {
 pub trait CallStream<Call> : Stream {
     /// Append the contents of the buffer `buf` to the data stream. Return the
     /// serial number of the call just written.
-    fn write_call(&mut self, call: &Call) -> Result<usize, Self::Error>;
+    fn write_call(&mut self, call: Call) -> Result<usize, Self::Error>;
 
     /// Return the serial number of the next call to be written.
     /// For debugging.
