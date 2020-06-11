@@ -44,11 +44,15 @@ mod file_stream;
 pub use file_stream::{FileStream, FileRecording};
 
 pub mod form;
+mod parameter;
+pub use parameter::Parameter;
+
 mod recorder;
 pub use recorder::Recorder;
 
 pub mod raw;
 pub mod var;
+pub use var::{CallStream, Stream};
 
 //mod replay;
 //pub use replay::{replay, replay_one};

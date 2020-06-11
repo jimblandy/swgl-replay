@@ -6,7 +6,7 @@ use std::os::raw::{c_int, c_void};
 use crate::call::Call;
 use crate::var::CallStream;
 use super::Recorder;
-use super::parameter::Parameter;
+use crate::Parameter;
 
 macro_rules! check {
     ($call:expr) => {

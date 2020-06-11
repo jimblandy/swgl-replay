@@ -3,7 +3,6 @@
 use std::sync;
 
 mod impl_gl;
-mod parameter;
 
 /// An implementation of `gleam::Gl` that records method calls for later replay.
 pub struct Recorder<G, Cs> {
@@ -11,6 +10,11 @@ pub struct Recorder<G, Cs> {
     inner_gl: G,
 
     /// The CallStream to which we record calls to `inner_gl`.
+
+    // I assume complex recording designs will have a single call stream shared
+    // by various recorders, and implementing `CallStream<T>` for various call
+    // types T. In that case, it would make sense for this to be an
+    // `Arc<Mutex<Cs>>`, but we don't need that yet.
     call_stream: sync::Mutex<Cs>,
 }
 
@@ -24,5 +28,9 @@ impl<G, Cs> Recorder<G, Cs> {
 
     pub fn inner_gl(&self) -> &G {
         &self.inner_gl
+    }
+
+    pub fn lock_call_stream(&self) -> sync::MutexGuard<Cs> {
+        self.call_stream.lock().unwrap()
     }
 }
