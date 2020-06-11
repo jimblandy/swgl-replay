@@ -7,6 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+docopt = "1.1"
 gl-replay = { path = "../gl-replay" }
 gleam = { path = "/home/jimb/rust/gleam" }
+serde = { version = "1", features = ["derive"] }
 swgl = { path = "/home/jimb/moz/central/gfx/wr/swgl" }

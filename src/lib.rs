@@ -21,7 +21,7 @@ mod call;
 mod dyn_swgl;
 mod impl_swgl;
 
-use call::Call as Call;
+pub use call::Call as Call;
 pub use dyn_swgl::Swgl;
 pub use gl_replay::Recorder;
 
@@ -52,3 +52,5 @@ impl gleam::gl::AsGl for FileRecorder {
 
 /// The magic number used to identify `gleam::Gl` file recordings.
 pub const SWGR_MAGIC: u32 = (((b'S' as u32) << 8 | (b'W' as u32)) << 8 | (b'G' as u32)) << 8 | (b'R' as u32);
+
+pub type FileRecording = gl_replay::FileRecording<Call>;

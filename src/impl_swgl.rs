@@ -4,7 +4,7 @@ use std::os::raw::c_void;
 
 use crate::call::Call;
 use crate::dyn_swgl::Swgl;
-use crate::InnerRecorder;
+use crate::FileRecorder;
 
 macro_rules! check {
     ($call:expr) => {
@@ -20,8 +20,8 @@ macro_rules! general {
         $body:expr
     ) => {
         {
-            let $returned = $self .inner_gl(). $method ( $( $arg ),* );
-            let $call_stream = &mut *$self .lock_call_stream();
+            let $returned = $self .0.inner_gl(). $method ( $( $arg ),* );
+            let $call_stream = &mut *$self .0.lock_call_stream();
 
             $body;
 
@@ -51,7 +51,8 @@ macro_rules! simple {
         }
     }
 }
-impl Swgl for InnerRecorder {
+
+impl Swgl for FileRecorder {
     fn init_default_framebuffer(&self, width: i32, height: i32) {
         simple!(self.init_default_framebuffer(width, height))
     }
