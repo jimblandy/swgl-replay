@@ -444,7 +444,9 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             format,
             ty,
             offset,
-        } => { gl.tex_sub_image_2d_pbo(
+        } => {
+            panic!("I think the `offset` argument is not what it seems in the _pbo functions");
+            gl.tex_sub_image_2d_pbo(
             target,
             level,
             xoffset,
