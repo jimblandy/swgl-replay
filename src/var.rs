@@ -248,7 +248,7 @@ fn take_aligned_slice<'b, T: raw::Simple>(
     let size: usize = mem::size_of::<T>();
     let align: usize = mem::align_of::<T>();
 
-    let align_skip = (0 - buf.as_ptr() as usize) & (align - 1);
+    let align_skip = (0_usize.wrapping_sub(buf.as_ptr() as usize)) & (align - 1);
     let full_size = align_skip + size * len;
     if buf.len() < full_size {
         return Err(DeserializeError::UnexpectedEof);

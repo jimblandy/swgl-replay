@@ -54,8 +54,8 @@ pub mod raw;
 pub mod var;
 pub use var::{CallStream, Stream};
 
-//mod replay;
-//pub use replay::{replay, replay_one};
+pub mod replay;
+pub use replay::{replay, replay_one};
 
 /// A `gleam::Gl` implementation that records calls to files.
 type FileRecorder<G> = Recorder<G, FileStream<Call>>;

@@ -6,9 +6,10 @@ use gleam::gl::{
 };
 
 use crate::call::Call;
-use crate::forms::{Var, Seq, Str};
-use crate::serialize::Deserialize;
-use crate::Recording;
+use crate::form::{Var, Seq, Str};
+use crate::var::DeserializeAs;
+use crate::raw;
+use crate::FileRecording;
 
 /// A `Gl` method argument type.
 ///
@@ -20,7 +21,7 @@ use crate::Recording;
 /// The `'v` lifetime parameter is the lifetime of the variable-length data. It
 /// allows implementations to return values that borrow from that, instead of
 /// copying.
-trait Parameter<'v, InCall>: Sized {
+pub trait Parameter<'v, InCall>: Sized {
     fn from_call(in_call: InCall, variable: &'v [u8]) -> Self;
 }
 
@@ -40,26 +41,37 @@ macro_rules! simple_parameter_types {
 // variable-length data to get their values.
 simple_parameter_types!(bool, u8, u32, i32, f32, f64, usize);
 
-fn get_slice<'v, T: 'v>(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T]
-    where &'v [T]: Deserialize<'v>
+pub fn get_slice<'v, T: 'v>(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T]
+where Seq<T>: DeserializeAs<'v, &'v [T]>,
+      T: raw::Simple,
 {
     let mut variable = &variable[in_call.offset()..];
-    <&[T]>::deserialize(&mut variable)
+    <Seq<T>>::deserialize(&mut variable)
         .expect("deserializing slice failed")
 }
 
 impl<'v, T: 'v> Parameter<'v, Var<Seq<T>>> for &'v [T]
-    where &'v [T]: Deserialize<'v>
+where Seq<T>: DeserializeAs<'v, &'v [T]>,
+      T: raw::Simple,
 {
     fn from_call(in_call: Var<Seq<T>>, variable: &'v [u8]) -> &'v [T] {
         get_slice(in_call, variable)
     }
 }
 
+impl<'v, T: 'v> Parameter<'v, Var<Seq<T>>> for Vec<T>
+where Seq<T>: DeserializeAs<'v, &'v [T]>,
+      T: raw::Simple,
+{
+    fn from_call(in_call: Var<Seq<T>>, variable: &'v [u8]) -> Vec<T> {
+        get_slice(in_call, variable).to_owned()
+    }
+}
+
 impl<'v> Parameter<'v, Var<Str>> for &'v str {
     fn from_call(in_call: Var<Str>, variable: &'v [u8]) -> &'v str {
         let mut variable = &variable[in_call.offset()..];
-        <&'v str>::deserialize(&mut variable)
+        <Str>::deserialize(&mut variable)
             .expect("deserializing &str parameter failed")
     }
 }
@@ -74,7 +86,7 @@ where T: Parameter<'v, U>
     }
 }
 
-fn get_parameter<'v, P, C>(in_call: C, variable: &'v [u8]) -> P
+pub fn get_parameter<'v, P, C>(in_call: C, variable: &'v [u8]) -> P
 where P: Parameter<'v, C>
 {
     P::from_call(in_call, variable)
@@ -115,7 +127,7 @@ struct Locals<'g> {
     serial: usize
 }
 
-pub fn replay(gl: &dyn Gl, recording: &Recording) {
+pub fn replay(gl: &dyn Gl, recording: &FileRecording<Call>) {
     let mut locals = Locals { gl, variable: &recording.variable, serial: 0 };
     for (serial, call) in recording.calls.iter().enumerate() {
         locals.serial = serial;
@@ -144,7 +156,7 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             usage,
         } => {
             let mut variable = &locals.variable[size_data.offset()..];
-            let size_data = <&[u8]>::deserialize(&mut variable)
+            let size_data: &[u8] = <Seq<u8>>::deserialize(&mut variable)
                 .expect("failed to deserialize data for buffer_data_untyped");
             gl.buffer_data_untyped(target,
                                    size_data.len() as GLsizeiptr,
@@ -199,17 +211,19 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             format,
             ty,
             opt_data,
-        } => unimplemented!() /*gl.tex_image_2d(
-            target,
-            level,
-            internal_format,
-            width,
-            height,
-            border,
-            format,
-            ty,
-            opt_data,
-    )*/,
+        } => {
+            simple!(locals: tex_image_2d(
+                target,
+                level,
+                internal_format,
+                width,
+                height,
+                border,
+                format,
+                ty,
+                opt_data,
+            ))
+        }
         tex_image_3d {
             target,
             level,
