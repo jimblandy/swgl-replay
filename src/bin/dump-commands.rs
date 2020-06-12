@@ -5,10 +5,10 @@ use std::io;
 use swgl_replay::FileRecording;
 
 const USAGE: &'static str = "
-Dump gl-replay command log.
+Dump swgl-replay command log.
 
 Usage:
-  gl-replay <dir>...
+  dump-commands <dir>...
 ";
 
 #[derive(Debug, Deserialize)]

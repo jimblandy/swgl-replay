@@ -20,10 +20,12 @@ use std::path::Path;
 mod call;
 mod dyn_swgl;
 mod impl_swgl;
+mod replay;
 
 pub use call::Call as Call;
 pub use dyn_swgl::Swgl;
-pub use gl_replay::Recorder;
+use gl_replay::Recorder;
+pub use replay::ReplayState;
 
 /// A `FileStream` for both SWGL and OpenGL calls.
 pub type FileStream = gl_replay::FileStream<Call>;

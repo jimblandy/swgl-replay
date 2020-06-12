@@ -60,9 +60,10 @@ impl Swgl for FileRecorder {
         general!(let returned = self.get_color_buffer(fbo, flush);
                  lock call_stream;
                  {
+                     let (buf, width, height) = returned;
                      let color_buffer = unsafe {
-                         std::slice::from_raw_parts(returned.0 as *const u8,
-                                                    returned.1 as usize * returned.2 as usize * 4)
+                         std::slice::from_raw_parts(buf as *const u32,
+                                                    width as usize * height as usize)
                      };
                      let var = check!(color_buffer.to_call(call_stream));
                      let call = Call::get_color_buffer {

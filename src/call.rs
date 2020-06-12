@@ -28,7 +28,7 @@ pub enum Call {
     get_color_buffer {
         fbo: GLuint,
         flush: bool,
-        returned: (Var<Seq<u8>>, i32, i32),
+        returned: (Var<Seq<u32>>, i32, i32),
     },
     set_texture_buffer {
         tex: GLuint,
