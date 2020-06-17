@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+expected.png
+actual.png
