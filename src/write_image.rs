@@ -5,7 +5,7 @@ use std::path::Path;
 use image::ColorType;
 use image::png::PNGEncoder;
 
-pub fn write_image<P: AsRef<Path>>(path: P, data: &[u8], width: u32, height: u32,
+pub fn write_image<P: AsRef<Path>>(path: P, data: &[u8], width: usize, height: usize,
                                    format: GLenum, pixel_type: GLenum) {
     let color_type = match (format, pixel_type) {
         (RGBA, UNSIGNED_BYTE) => ColorType::Rgba8,
@@ -16,7 +16,7 @@ pub fn write_image<P: AsRef<Path>>(path: P, data: &[u8], width: u32, height: u32
     let file = File::create(path)
         .expect("gl-replay: write_image: error creating file");
     let encoder = PNGEncoder::new(file);
-    encoder.encode(data, width, height, color_type)
+    encoder.encode(data, width as u32, height as u32, color_type)
         .expect("gl-replay: write_image: error writing file");
 }
 

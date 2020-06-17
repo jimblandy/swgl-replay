@@ -762,8 +762,8 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             if expected != &actual[..] {
                 eprintln!("gl-replay: method read_pixels_into_buffer (serial {}) returned unexpected value",
                           locals.serial);
-                write_image("expected.png", expected, width as u32, height as u32, format, pixel_type);
-                write_image("actual.png", &actual, width as u32, height as u32, format, pixel_type);
+                write_image("expected.png", expected, width as usize, height as usize, format, pixel_type);
+                write_image("actual.png", &actual, width as usize, height as usize, format, pixel_type);
                 eprintln!("Comparison images saved to 'expected.png' and 'actual.png'");
                 panic!("replay cannot proceed");
             }
