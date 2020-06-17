@@ -764,7 +764,7 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
                           locals.serial);
                 write_image("expected.png", expected, width as u32, height as u32, format, pixel_type);
                 write_image("actual.png", &actual, width as u32, height as u32, format, pixel_type);
-                eprintln!("Comparison images saved to 'expected.png' and 'actual.png');
+                eprintln!("Comparison images saved to 'expected.png' and 'actual.png'");
                 panic!("replay cannot proceed");
             }
             check_filled_slice!(locals: read_pixels_into_buffer(x, y, width, height, format, pixel_type):

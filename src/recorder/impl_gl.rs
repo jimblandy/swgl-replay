@@ -1219,7 +1219,7 @@ where G: Gl,
     }
 
     fn clear_color(&self, r: f32, g: f32, b: f32, a: f32) {
-        no_side_effect!(self.clear_color(r, g, b, a))
+        simple!(self.clear_color(r, g, b, a))
     }
 
     fn clear(&self, buffer_mask: GLbitfield) {
