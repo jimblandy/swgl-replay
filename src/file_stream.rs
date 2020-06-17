@@ -14,6 +14,7 @@ pub struct FileStream<Call> {
     variable: io::BufWriter<fs::File>,
     bytes_written: usize,
     call_serial: usize,
+    size_limit: usize,
     _phantom: std::marker::PhantomData<Call>
 }
 
@@ -39,8 +40,13 @@ impl<Call: Simple> FileStream<Call> {
             variable,
             bytes_written: 0,
             call_serial: 0,
+            size_limit: 4 * 1024 * 1024 * 1024,
             _phantom: Default::default(),
         })
+    }
+
+    pub fn set_size_limit(&mut self, limit: usize) {
+        self.size_limit = limit;
     }
 }
 
@@ -51,6 +57,13 @@ impl<Call> Stream for FileStream<Call> {
         let pos = self.bytes_written;
         self.variable.write_all(buf)?;
         self.bytes_written += buf.len();
+
+        // This lets us go over by one request, but the intent of the size limit
+        // is to avoid accidentally owning your own machine, so this will
+        // hopefully be good enough.
+        if self.bytes_written > self.size_limit {
+            panic!("gl-replay: file stream size limit reached");
+        }
         Ok(pos)
     }
 
