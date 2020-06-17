@@ -5,11 +5,12 @@ use gleam::gl::{
     GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLsizeiptr, GLuint, GLvoid,
 };
 
-use crate::call::Call;
+use crate::call::{Call, TexImageData};
 use crate::form::{Var, Seq, Str};
 use crate::var::DeserializeAs;
 use crate::raw;
 use crate::FileRecording;
+use crate::write_image;
 
 /// A `Gl` method argument type.
 ///
@@ -59,12 +60,12 @@ where Seq<T>: DeserializeAs<'v, &'v [T]>,
     }
 }
 
-impl<'v, T: 'v> Parameter<'v, Var<Seq<T>>> for Vec<T>
-where Seq<T>: DeserializeAs<'v, &'v [T]>,
-      T: raw::Simple,
+impl<'v, T: 'v, U> Parameter<'v, Var<Seq<U>>> for Vec<T>
+where U: DeserializeAs<'v, T>
 {
-    fn from_call(in_call: Var<Seq<T>>, variable: &'v [u8]) -> Vec<T> {
-        get_slice(in_call, variable).to_owned()
+    fn from_call(in_call: Var<Seq<U>>, variable: &'v [u8]) -> Vec<T> {
+        let mut variable = &variable[in_call.offset()..];
+        <Seq<U>>::deserialize(&mut variable).unwrap()
     }
 }
 
@@ -92,8 +93,18 @@ where P: Parameter<'v, C>
     P::from_call(in_call, variable)
 }
 
+/// If `in_call` refers to data saved in the variable section, return an
+/// `offset` value that is a pointer to that data. Otherwise, return it as a
+/// real offset.
+fn call_to_tex_image_data_offset<'v>(in_call: TexImageData, variable: &'v [u8]) -> usize {
+    match in_call {
+        TexImageData::Buf(var) => get_slice(var, variable).as_ptr() as usize,
+        TexImageData::Offset(offset) => offset
+    }
+}
+
 macro_rules! simple {
-    ( $locals:ident : $method:ident ( $( $arg:ident, )* ) ) =>
+    ( $locals:ident : $method:ident ( $( $arg:ident ),* ) ) =>
     {
         {
             $locals .gl. $method (
@@ -105,16 +116,75 @@ macro_rules! simple {
     }
 }
 
-macro_rules! check_returned_vector {
+macro_rules! check_return_value {
     ( $locals:ident : $method:ident ( $( $arg:ident ),* ): $returned:ident ) => {
         {
-            let actual = $locals .gl. $method ( $( $arg )* );
-            let expected = get_slice( $returned, & $locals .variable );
-            if expected != &actual[..] {
+            let actual = $locals .gl. $method (
+                $(
+                    get_parameter( $arg, & $locals .variable ),
+                )*
+            );
+            let expected = $returned;
+            if expected != actual {
                 eprintln!("gl-replay: method {} (serial {}) returned unexpected value",
                           stringify!( $method ), $locals .serial);
                 eprintln!("expected: {:?}", expected);
                 eprintln!("actual: {:?}", actual);
+                panic!("replay cannot proceed");
+            }
+        }
+    }
+}
+
+macro_rules! check_returned_vector {
+    ( $locals:ident : $method:ident ( $( $arg:ident ),* ): $returned:ident ) => {
+        {
+            let actual = $locals .gl. $method ( $( $arg ),* );
+            let expected = get_slice( $returned, & $locals .variable );
+            if expected != &actual[..] {
+                eprintln!("gl-replay: method {} (serial {}) returned unexpected value",
+                          stringify!( $method ), $locals .serial);
+                if expected.len() + actual.len() < 1000 {
+                    eprintln!("expected: {:?}", expected);
+                    eprintln!("actual: {:?}", actual);
+                }
+                panic!("replay cannot proceed");
+            }
+        }
+    }
+}
+
+macro_rules! check_filled_slice {
+    ( $locals:ident : $method:ident ( $( $arg:ident ),* ): $result:ident ) => {
+        check_filled_slice!(@combined $locals : $method ( $( $arg ),* ):
+                            (
+                                $locals .gl. $method ( $( $arg, )* &mut $result)
+                            ):
+                            $result)
+    };
+
+    ( $locals:ident : unsafe $method:ident ( $( $arg:ident ),* ): $result:ident ) => {
+        check_filled_slice!(@combined $locals : $method ( $( $arg ),* ):
+                            (
+                                unsafe {
+                                    $locals .gl. $method ( $( $arg, )* &mut $result);
+                                }
+                            ):
+                            $result)
+    };
+
+    (@combined $locals:ident : $method:ident ( $( $arg:ident ),* ) : ( $call:expr ) : $result:ident ) => {
+        {
+            let expected = get_slice( $result, & $locals .variable );
+            let mut $result = expected.to_owned();
+            $call;
+            if expected != & $result [..] {
+                eprintln!("gl-replay: method {} (serial {}) returned unexpected value",
+                          stringify!( $method ), $locals .serial);
+                if expected.len() + $result .len() < 1000 {
+                    eprintln!("expected: {:?}", expected);
+                    eprintln!("actual: {:?}", $result );
+                }
                 panic!("replay cannot proceed");
             }
         }
@@ -221,7 +291,7 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
                 border,
                 format,
                 ty,
-                opt_data,
+                opt_data
             ))
         }
         tex_image_3d {
@@ -246,7 +316,7 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
                 border,
                 format,
                 ty,
-                opt_data,
+                opt_data
             ))
         }
         tex_parameter_f {
@@ -291,7 +361,7 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
                 depth,
                 format,
                 ty,
-                data,
+                data
             ))
         }
         use_program { program } => { gl.use_program(program); }
@@ -445,7 +515,6 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             ty,
             offset,
         } => {
-            panic!("I think the `offset` argument is not what it seems in the _pbo functions");
             gl.tex_sub_image_2d_pbo(
             target,
             level,
@@ -455,37 +524,40 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             height,
             format,
             ty,
-            offset,
+            call_to_tex_image_data_offset(offset, locals.variable)
         ); }
         flush {} => { gl.flush(); }
         finish {} => { gl.finish(); }
         depth_mask { flag } => { gl.depth_mask(flag); }
-        create_program { returned } => unimplemented!("create_program"),
+        create_program { returned } => {
+            check_return_value!(locals: create_program(): returned)
+        }
         create_shader {
             shader_type,
             returned,
-        } => unimplemented!("create_shader"),
-        shader_source { shader, strings } => unimplemented!("shader_source"), /*{ gl.shader_source(shader, strings); }*/
+        } => {
+            check_return_value!(locals: create_shader(shader_type): returned)
+        }
+        shader_source { shader, strings } => {
+            let strings = <Vec<&[u8]>>::from_call(strings, locals.variable);
+            locals.gl.shader_source(shader, &strings)
+        }
         compile_shader { shader } => { gl.compile_shader(shader); }
         get_shader_iv {
             shader,
             pname,
             result,
-        } => unimplemented!("get_shader_iv"), /*{ gl.get_shader_iv(
-        shader,
-        pname,
-        result,
-    ); }*/
+        } => {
+            check_filled_slice!(locals: unsafe get_shader_iv(shader, pname) : result)
+        }
         attach_shader { program, shader } => { gl.attach_shader(program, shader); }
         bind_attrib_location {
             program,
             index,
             name,
-        } => unimplemented!("bind_attrib_location"), /*{ gl.bind_attrib_location(
-        program,
-        index,
-        name,
-    ); }*/
+        } => {
+            simple!(locals: bind_attrib_location(program, index, name))
+        }
         link_program { program } => { gl.link_program(program); }
         delete_shader { shader } => { gl.delete_shader(shader); }
         detach_shader { program, shader } => { gl.detach_shader(program, shader); }
@@ -494,16 +566,16 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
         clear_stencil { s } => { gl.clear_stencil(s); }
         get_attrib_location { program, name } => unimplemented!("get_attrib_location"), /*{ gl.get_attrib_location(program, name); }*/
         get_frag_data_location { program, name } => unimplemented!("get_frag_data_location"), /*{ gl.get_frag_data_location(program, name); }*/
-        get_uniform_location { program, name } => unimplemented!("get_uniform_location"), /*{ gl.get_uniform_location(program, name); }*/
+        get_uniform_location { program, name, returned } => {
+            check_return_value!(locals: get_uniform_location(program, name): returned)
+        }
         get_program_iv {
             program,
             pname,
             result,
-        } => unimplemented!("get_program_iv"), /*{ gl.get_program_iv(
-        program,
-        pname,
-        result,
-    ); }*/
+        } => {
+            check_filled_slice!(locals: unsafe get_program_iv(program, pname) : result)
+        }
         uniform_1i { location, v0 } => { gl.uniform_1i(location, v0); }
         uniform_1iv { location, values } => unimplemented!("uniform_1iv"), /*{ gl.uniform_1iv(location, values); }*/
         uniform_1f { location, v0 } => { gl.uniform_1f(location, v0); }
@@ -589,34 +661,30 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             z,
             w,
         ); }
-        uniform_4fv { location, values } => unimplemented!("uniform_4fv"), /*{ gl.uniform_4fv(location, values); }*/
+        uniform_4fv { location, values } => {
+            check_filled_slice!(locals: uniform_4fv(location): values)
+        }
         uniform_matrix_2fv {
             location,
             transpose,
             value,
-        } => unimplemented!("uniform_matrix_2fv"), /*{ gl.uniform_matrix_2fv(
-        location,
-        transpose,
-        value,
-    ); }*/
+        } => {
+            check_filled_slice!(locals: uniform_matrix_4fv(location, transpose): value)
+        }
         uniform_matrix_3fv {
             location,
             transpose,
             value,
-        } => unimplemented!("uniform_matrix_3fv"), /*{ gl.uniform_matrix_3fv(
-        location,
-        transpose,
-        value,
-    ); }*/
+        } => {
+            check_filled_slice!(locals: uniform_matrix_3fv (location, transpose): value)
+        }
         uniform_matrix_4fv {
             location,
             transpose,
             value,
-        } => unimplemented!("uniform_matrix_4fv"), /*{ gl.uniform_matrix_4fv(
-        location,
-        transpose,
-        value,
-    ); }*/
+        } => {
+            check_filled_slice!(locals: uniform_matrix_4fv(location, transpose): value)
+        }
         depth_range { near, far } => { gl.depth_range(near, far); }
         draw_elements_instanced {
             mode,
@@ -659,10 +727,10 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
         invalidate_framebuffer {
             target,
             attachments,
-        } => unimplemented!("invalidate_framebuffer"), /*{ gl.invalidate_framebuffer(
-        target,
-        attachments,
-    ); }*/
+        } => {
+            let attachments: Vec<GLenum> = get_parameter(attachments, &locals.variable);
+            locals.gl.invalidate_framebuffer(target, &attachments)
+        }
         invalidate_sub_framebuffer {
             target,
             attachments,
@@ -687,15 +755,21 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             format,
             pixel_type,
             dst_buffer,
-        } => unimplemented!("read_pixels_into_buffer"), /*{ gl.read_pixels_into_buffer(
-        x,
-        y,
-        width,
-        height,
-        format,
-        pixel_type,
-        dst_buffer,
-    ); }*/
+        } => {
+            let expected = get_slice(dst_buffer, locals.variable);
+            let mut actual = expected.to_owned();
+            gl.read_pixels_into_buffer(x, y, width, height, format, pixel_type, &mut actual);
+            if expected != &actual[..] {
+                eprintln!("gl-replay: method read_pixels_into_buffer (serial {}) returned unexpected value",
+                          locals.serial);
+                write_image("expected.png", expected, width as u32, height as u32, format, pixel_type);
+                write_image("actual.png", &actual, width as u32, height as u32, format, pixel_type);
+                eprintln!("Comparison images saved to 'expected.png' and 'actual.png');
+                panic!("replay cannot proceed");
+            }
+            check_filled_slice!(locals: read_pixels_into_buffer(x, y, width, height, format, pixel_type):
+                                dst_buffer)
+        }
         read_pixels {
             x,
             y,
@@ -703,14 +777,10 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             height,
             format,
             pixel_type,
-        } => { gl.read_pixels(
-            x,
-            y,
-            width,
-            height,
-            format,
-            pixel_type,
-        ); }
+            returned,
+        } => {
+            check_returned_vector!(locals: read_pixels(x, y, width, height, format, pixel_type): returned)
+        }
         read_pixels_into_pbo {
             x,
             y,
@@ -751,14 +821,30 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             pname,
             returned,
         } => unimplemented!("get_query_object_ui64v"),
-        delete_queries { queries } => unimplemented!("delete_queries"), /*{ gl.delete_queries(queries); }*/
-        delete_vertex_arrays { vertex_arrays } => unimplemented!("delete_vertex_arrays"), /*{ gl.delete_vertex_arrays(vertex_arrays); }*/
-        delete_vertex_arrays_apple { vertex_arrays } => unimplemented!("delete_vertex_arrays_apple"), /*{ gl.delete_vertex_arrays_apple(vertex_arrays); }*/
-        delete_buffers { buffers } => unimplemented!("delete_buffers"), /*{ gl.delete_buffers(buffers); }*/
-        delete_renderbuffers { renderbuffers } => unimplemented!("delete_renderbuffers"), /*{ gl.delete_renderbuffers(renderbuffers); }*/
-        delete_framebuffers { framebuffers } => unimplemented!("delete_framebuffers"), /*{ gl.delete_framebuffers(framebuffers); }*/
-        delete_textures { textures } => unimplemented!("delete_textures"), /*{ gl.delete_textures(textures); }*/
-        delete_program { program } => { gl.delete_program(program); }
+        delete_queries { queries } => {
+            simple!(locals: delete_queries(queries))
+        }
+        delete_vertex_arrays { vertex_arrays } => {
+            simple!(locals: delete_vertex_arrays(vertex_arrays))
+        }
+        delete_vertex_arrays_apple { vertex_arrays } => {
+            simple!(locals: delete_vertex_arrays_apple(vertex_arrays))
+        }
+        delete_buffers { buffers } => {
+            simple!(locals: delete_buffers(buffers))
+        }
+        delete_renderbuffers { renderbuffers } => {
+            simple!(locals: delete_renderbuffers(renderbuffers))
+        }
+        delete_framebuffers { framebuffers } => {
+            simple!(locals: delete_framebuffers(framebuffers))
+        }
+        delete_textures { textures } => {
+            simple!(locals: delete_textures(textures))
+        }
+        delete_program { program } => {
+            simple!(locals: delete_program(program))
+        }
         tex_sub_image_3d_pbo {
             target,
             level,
@@ -782,7 +868,7 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
             depth,
             format,
             ty,
-            offset,
+            call_to_tex_image_data_offset(offset, locals.variable)
         ); }
         tex_storage_2d {
             target,

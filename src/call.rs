@@ -4,10 +4,30 @@ use gleam::gl::{
     GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLuint,
 };
 
+use std::os::raw::c_int;
+
 use crate::form::{Var, Seq, Str};
 use crate::raw;
 
 unsafe impl raw::Simple for Call { }
+
+/// Either a buffer, or an offset into the currently bound PIXEL_UNPACK_BUFFER.
+///
+/// The `tex_image_2d`, `tex_sub_image_2d`, `tex_image_3d`, and
+/// `tex_sub_image_3d` methods all take a final data pointer which gets
+/// interpreted as an offset into the PIXEL_UNPACK_BUFFER if that is bound,
+/// or as a raw address if it is not.
+///
+/// When it is a pointer to data, we want to save the data being passed in,
+/// and on replay pass a pointer to the recorded data.
+///
+/// When it is an offset, we want to serialize the offset, and pass the
+/// identical offset.
+#[derive(Copy, Clone, Debug)]
+pub enum TexImageData {
+    Buf(Var<Seq<u8>>),
+    Offset(usize),
+}
 
 /// An enum representing all possible `Gl` trait method calls.
 ///
@@ -68,7 +88,7 @@ pub enum Call {
     check_frame_buffer_status { target: GLenum },
     renderbuffer_storage { target: GLenum, internalformat: GLenum, width: GLsizei, height: GLsizei },
     framebuffer_renderbuffer { target: GLenum, attachment: GLenum, renderbuffertarget: GLenum, renderbuffer: GLuint },
-    tex_sub_image_2d_pbo { target: GLenum, level: GLint, xoffset: GLint, yoffset: GLint, width: GLsizei, height: GLsizei, format: GLenum, ty: GLenum, offset: usize },
+    tex_sub_image_2d_pbo { target: GLenum, level: GLint, xoffset: GLint, yoffset: GLint, width: GLsizei, height: GLsizei, format: GLenum, ty: GLenum, offset: TexImageData },
     flush {  },
     finish {  },
     depth_mask { flag: bool },
@@ -87,7 +107,7 @@ pub enum Call {
     clear_stencil { s: GLint },
     get_attrib_location { program: GLuint, name: Var<Str> },
     get_frag_data_location { program: GLuint, name: Var<Str> },
-    get_uniform_location { program: GLuint, name: Var<Str> },
+    get_uniform_location { program: GLuint, name: Var<Str>, returned: c_int },
     get_program_iv { program: GLuint, pname: GLenum, result: Var<Seq<GLint>> },
     uniform_1i { location: GLint, v0: GLint },
     uniform_1iv { location: GLint, values: Var<Seq<i32>> },
@@ -127,7 +147,7 @@ pub enum Call {
     invalidate_sub_framebuffer { target: GLenum, attachments: Var<Seq<GLenum>>, xoffset: GLint, yoffset: GLint, width: GLsizei, height: GLsizei },
     read_buffer { mode: GLenum },
     read_pixels_into_buffer { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum, dst_buffer: Var<Seq<u8>> },
-    read_pixels { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum },
+    read_pixels { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum, returned: Var<Seq<u8>> },
     read_pixels_into_pbo { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum },
     sample_coverage { value: GLclampf, invert: bool },
     polygon_offset { factor: GLfloat, units: GLfloat },
@@ -146,7 +166,7 @@ pub enum Call {
     delete_framebuffers { framebuffers: Var<Seq<GLuint>> },
     delete_textures { textures: Var<Seq<GLuint>> },
     delete_program { program: GLuint },
-    tex_sub_image_3d_pbo { target: GLenum, level: GLint, xoffset: GLint, yoffset: GLint, zoffset: GLint, width: GLsizei, height: GLsizei, depth: GLsizei, format: GLenum, ty: GLenum, offset: usize },
+    tex_sub_image_3d_pbo { target: GLenum, level: GLint, xoffset: GLint, yoffset: GLint, zoffset: GLint, width: GLsizei, height: GLsizei, depth: GLsizei, format: GLenum, ty: GLenum, offset: TexImageData },
     tex_storage_2d { target: GLenum, levels: GLint, internal_format: GLenum, width: GLsizei, height: GLsizei },
     tex_storage_3d { target: GLenum, levels: GLint, internal_format: GLenum, width: GLsizei, height: GLsizei, depth: GLsizei },
     get_tex_image_into_buffer { target: GLenum, level: GLint, format: GLenum, ty: GLenum, output: Var<Seq<u8>> },

@@ -14,7 +14,7 @@ pub struct Recorder<G, Cs> {
     // I assume complex recording designs will have a single call stream shared
     // by various recorders, and implementing `CallStream<T>` for various call
     // types T. In that case, it would make sense for this to be an
-    // `Arc<Mutex<Cs>>`, but we don't need that yet.
+    // `Arc<Mutex<Cs>>`. But we don't need that for SWGL.
     call_stream: sync::Mutex<Cs>,
 }
 
