@@ -28,30 +28,30 @@
 use crate::form::{Seq, Str};
 use crate::raw;
 
+use std::io;
 use std::mem;
 
-/// A data stream to which we can write serialized values.
+/// A byte stream which tracks the current byte offset.
 ///
-/// Types that implement `VarSerialize` can write themselves to a data stream
+/// Types that implement `Serialize` can write themselves to a data stream
 /// that implements this trait.
-pub trait Stream {
-    type Error: std::error::Error;
-
-    /// Append the contents of the buffer `buf` to the data stream. Return the
-    /// byte offset of the start of the data within the stream.
-    fn write_unaligned(&mut self, buf: &[u8]) -> Result<usize, Self::Error>;
-
+pub trait MarkedWrite: io::Write {
     /// Return the current byte offset in the stream. This is the position
-    /// that the next call to `write_unaligned` will return.
+    /// that the next call to `write_all_marked` will return.
     fn mark(&self) -> usize;
 
-    /// Flush buffers, if any.
-    fn flush(&mut self) -> Result<(), Self::Error>;
+    /// Write the contents of the buffer `buf` to the data stream. Return the
+    /// byte offset of the start of the data within the stream.
+    fn marked_write_all(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mark = self.mark();
+        self.write_all(buf)?;
+        Ok(mark)
+    }
 
     /// Write the contents of `slice` to the variable-length data stream,
     /// starting with padding as needed to align it properly for elements of
     /// type `T`. Return its start position, after any padding.
-    fn write_aligned_slice<T>(&mut self, slice: &[T]) -> Result<usize, Self::Error>
+    fn marked_write_all_aligned<T>(&mut self, slice: &[T]) -> io::Result<usize>
     where T: raw::Simple
     {
         // Insert padding bytes as needed to put the slice at a properly
@@ -60,17 +60,17 @@ pub trait Stream {
         if padding_length > 0 {
             static PADDING: [u8; 64] = [b'P'; 64];
             assert!(padding_length <= PADDING.len());
-            self.write_unaligned(&PADDING[..padding_length])?;
+            self.marked_write_all(&PADDING[..padding_length])?;
         }
 
         // Write the actual contents.
         let pos = self.mark();
-        self.write_unaligned(raw::slice_as_bytes(slice))?;
+        self.marked_write_all(raw::slice_as_bytes(slice))?;
         Ok(pos)
     }
 }
 
-/// An extension of `Stream` which can also build an array of `Call` values.
+/// An extension of `MarkedWrite` which also writes a separate stream of `Call` values.
 ///
 /// Note that `Call` here is a generic type parameter: this trait is not
 /// specific to OpenGL calls or gleam. You can use this to record any stream of
@@ -80,17 +80,17 @@ pub trait Stream {
 /// a `&[Call]` slice from the data, with no per-element serialization needed.
 /// The `Call` parameter should be something suitably simple (`Copy`, at least),
 /// to make this possible.
-pub trait CallStream<Call> : Stream {
+pub trait CallStream<Call> : MarkedWrite {
     /// Append the contents of the buffer `buf` to the data stream. Return the
     /// serial number of the call just written.
-    fn write_call(&mut self, call: Call) -> Result<usize, Self::Error>;
+    fn write_call(&mut self, call: Call) -> io::Result<usize>;
 
     /// Return the serial number of the next call to be written.
     /// For debugging.
-    fn serial(&self) -> usize;
+    fn call_serial(&self) -> usize;
 }
 
-/// A type that can be serialized to a `var::Stream`.
+/// A type that can be serialized to a `var::MarkedWrite`.
 pub trait Serialize {
     /// The form in which `Self` values are serialized, using the types from the
     /// `form` module.
@@ -101,18 +101,18 @@ pub trait Serialize {
 
     /// Serialize a single `Self` value. On success, return the byte offset it
     /// was written to in `stream`.
-    fn serialize<S: Stream>(&self, stream: &mut S) -> Result<usize, S::Error>;
+    fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize>;
 
     /// Serialize a `[Self]` slice in the `Seq` form.
     ///
     /// The default definition of this function simply uses a loop to write out
     /// each element. Implementations for types that can be written as a single
     /// block should override this to do so.
-    fn serialize_seq<S: Stream>(seq: &[Self], stream: &mut S) -> Result<usize, S::Error>
+    fn serialize_seq<S: MarkedWrite>(seq: &[Self], stream: &mut S) -> io::Result<usize>
     where
         Self: Sized,
     {
-        let pos = stream.write_aligned_slice(&[seq.len()])?;
+        let pos = stream.marked_write_all_aligned(&[seq.len()])?;
         for elt in seq {
             elt.serialize(stream)?;
         }
@@ -141,17 +141,17 @@ macro_rules! implement_serialize_for_simple {
             /// Simple types are serialized as their in-memory form.
             impl Serialize for $type {
                 type Form = $type;
-                fn serialize<S: Stream>(&self, stream: &mut S) -> Result<usize, S::Error> {
-                    stream.write_aligned_slice(std::slice::from_ref(self))
+                fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize> {
+                    stream.marked_write_all_aligned(std::slice::from_ref(self))
                 }
 
                 /// Slices of simple types can be handled with a single write.
-                fn serialize_seq<S: Stream>(seq: &[Self], stream: &mut S) -> Result<usize, S::Error>
+                fn serialize_seq<S: MarkedWrite>(seq: &[Self], stream: &mut S) -> io::Result<usize>
                 where
                     Self: Sized,
                 {
                     let pos = seq.len().serialize(stream)?;
-                    stream.write_aligned_slice(seq)?;
+                    stream.marked_write_all_aligned(seq)?;
                     Ok(pos)
                 }
             }
@@ -175,7 +175,7 @@ impl<'b, T: raw::Simple + 'b> DeserializeAs<'b, T> for T {
 impl<T: Serialize> Serialize for [T]
 {
     type Form = Seq<T::Form>;
-    fn serialize<S: Stream>(&self, stream: &mut S) -> Result<usize, S::Error> {
+    fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize> {
         // Let the element type choose how to write the slice.
         <T as Serialize>::serialize_seq(self, stream)
     }
@@ -191,14 +191,14 @@ impl<'b, T: raw::Simple> DeserializeAs<'b, &'b [T]> for Seq<T> {
 /// References are transparent to serialization: `&T` is serialized just like `T`.
 impl<T: Serialize + ?Sized> Serialize for &T {
     type Form = T::Form;
-    fn serialize<S: Stream>(&self, stream: &mut S) -> Result<usize, S::Error> {
+    fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize> {
         (*self).serialize(stream)
     }
 }
 
 impl<T: Serialize> Serialize for Vec<T> {
     type Form = Seq<T::Form>;
-    fn serialize<S: Stream>(&self, stream: &mut S) -> Result<usize, S::Error> {
+    fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize> {
         // Let the element type choose how to write the slice.
         <T as Serialize>::serialize_seq(self, stream)
     }
@@ -221,7 +221,7 @@ impl<'b, F, T> DeserializeAs<'b, Vec<T>> for Seq<F>
 
 impl Serialize for str {
     type Form = Str;
-    fn serialize<S: Stream>(&self, stream: &mut S) -> Result<usize, S::Error> {
+    fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize> {
         self.as_bytes().serialize(stream)
     }
 }

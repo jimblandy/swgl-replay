@@ -1,7 +1,9 @@
 //! Serializing parameters to `Gl` calls.
 
 use crate::form::{Var, Seq, Str};
-use crate::var::{Serialize, Stream};
+use crate::var::{Serialize, MarkedWrite};
+
+use std::io;
 
 /// A `Gl` method argument type.
 ///
@@ -21,7 +23,7 @@ pub trait Parameter {
     /// If `&self` is the actual value of the parameter passed to the `Gl`
     /// method, return the value that should represent it in the `Call`,
     /// serializing any side data to `stream`.
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error>;
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form>;
 }
 
 /// `Simple` types, in the `var` module's sense, are included directly in the
@@ -31,7 +33,7 @@ macro_rules! direct_parameters {
         $(
             impl Parameter for $type {
                 type Form = $type;
-                fn to_call<S: Stream>(&self, _stream: &mut S) -> Result<Self, S::Error> {
+                fn to_call<S: MarkedWrite>(&self, _stream: &mut S) -> io::Result<Self> {
                     Ok(*self)
                 }
             }
@@ -47,7 +49,7 @@ direct_parameters!(u8, u16, u32, u64, u128, usize,
 impl<T: Serialize> Parameter for [T] {
     type Form = Var<Seq<T::Form>>;
 
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         Ok(Var::new(self.serialize(stream)?))
     }
 }
@@ -55,7 +57,7 @@ impl<T: Serialize> Parameter for [T] {
 impl<T: Serialize> Parameter for Vec<T> {
     type Form = Var<Seq<T::Form>>;
 
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         Ok(Var::new(self.serialize(stream)?))
     }
 }
@@ -63,7 +65,7 @@ impl<T: Serialize> Parameter for Vec<T> {
 impl Parameter for str {
     type Form = Var<Str>;
 
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         Ok(Var::new(self.serialize(stream)?))
     }
 }
@@ -72,7 +74,7 @@ impl Parameter for str {
 impl<T: Parameter + ?Sized> Parameter for &T {
     type Form = T::Form;
 
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         (**self).to_call(stream)
     }
 }
@@ -83,7 +85,7 @@ impl<T: Parameter + ?Sized> Parameter for &T {
 impl<T: Parameter + ?Sized> Parameter for &mut T {
     type Form = T::Form;
 
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         (**self).to_call(stream)
     }
 }
@@ -93,7 +95,7 @@ impl<T: Parameter + ?Sized> Parameter for &mut T {
 impl<T: Parameter> Parameter for Option<T> {
     type Form = Option<T::Form>;
 
-    fn to_call<S: Stream>(&self, stream: &mut S) -> Result<Self::Form, S::Error> {
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         self.as_ref()
             .map(|param| param.to_call(stream))
             .transpose() // from `Option<Result>` to `Result<Option>`

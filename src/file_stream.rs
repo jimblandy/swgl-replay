@@ -6,7 +6,7 @@ use std::path::Path;
 use std::{fs, io, mem};
 
 use crate::raw::{self, Simple};
-use crate::var::{CallStream, Stream};
+use crate::var::{CallStream, MarkedWrite};
 
 /// A `CallStream` implementation that writes the OpenGL calls to files on disk.
 pub struct FileStream<Call> {
@@ -50,31 +50,31 @@ impl<Call: Simple> FileStream<Call> {
     }
 }
 
-impl<Call> Stream for FileStream<Call> {
-    type Error = io::Error;
+impl<Call> io::Write for FileStream<Call> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = self.variable.write(buf)?;
+        self.bytes_written += written;
 
-    fn write_unaligned(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        let pos = self.bytes_written;
-        self.variable.write_all(buf)?;
-        self.bytes_written += buf.len();
-
-        // This lets us go over by one request, but the intent of the size limit
-        // is to avoid accidentally owning your own machine, so this will
+        // This lets us go over by one `write`, but the intent of the size limit
+        // is just to avoid accidentally owning your own machine, so this will
         // hopefully be good enough.
         if self.bytes_written > self.size_limit {
             panic!("gl-replay: file stream size limit reached");
         }
-        Ok(pos)
+
+        Ok(written)
     }
 
-    fn mark(&self) -> usize {
-        self.bytes_written
-    }
-
-    fn flush(&mut self) -> Result<(), Self::Error> {
+    fn flush(&mut self) -> io::Result<()> {
         self.calls.flush()?;
         self.variable.flush()?;
         Ok(())
+    }
+}
+
+impl<Call> MarkedWrite for FileStream<Call> {
+    fn mark(&self) -> usize {
+        self.bytes_written
     }
 }
 
@@ -82,7 +82,7 @@ impl<Stored, Passed> CallStream<Passed> for FileStream<Stored>
     where Stored: Simple,
           Passed: Into<Stored>
 {
-    fn write_call(&mut self, call: Passed) -> Result<usize, Self::Error> {
+    fn write_call(&mut self, call: Passed) -> io::Result<usize> {
         let call = call.into();
         let n = self.call_serial;
         self.calls.write_all(raw::as_bytes(&call))?;
@@ -90,7 +90,7 @@ impl<Stored, Passed> CallStream<Passed> for FileStream<Stored>
         Ok(n)
     }
 
-    fn serial(&self) -> usize {
+    fn call_serial(&self) -> usize {
         self.call_serial
     }
 }
