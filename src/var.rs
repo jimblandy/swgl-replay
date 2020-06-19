@@ -25,7 +25,7 @@
 //! References are transparent to serialization: a reference value is simply
 //! serialized the way its referent would be.
 
-use crate::form::{Seq, Str};
+use crate::form::{Seq, Str, Rle};
 use crate::raw;
 
 use std::io;
@@ -262,10 +262,174 @@ fn take_aligned_slice<'b, T: raw::Simple>(
     Ok(slice)
 }
 
+pub fn write_rle<T, S>(mut data: &[T], stream: &mut S) -> Result<(), io::Error>
+    where T: raw::Simple + PartialEq,
+          S: io::Write,
+{
+    // If `data` is non-empty, start with a run.
+    let mut lead = match data.split_first() {
+        None => return Ok(()),
+        Some((head, tail)) => {
+            data = tail;
+            *head
+        }
+    };
+    let mut run_length = 1;
+
+    loop {
+        // invariant: `data` is the portion of the input immediately following
+        // `run_length` consecutive copies of `lead`.
+
+        // Extend the run as far as we can.
+        let extension_length = data.iter().take_while(|&&v| v == lead).count();
+
+        leb128::write::unsigned(stream, (run_length + extension_length) as u64)?;
+        stream.write_all(raw::as_bytes(&lead))?;
+        data = &data[extension_length..];
+
+        // Write a literal. Figuring out the optimal place to end a literal and
+        // switch to a run is not straightforward. Don't bother trying to be
+        // optimal; just require at least four repetitions to switch to a run.
+        let literal_tail = match data.split_first() {
+            None => return Ok(()),
+            Some((head, tail)) => {
+                lead = *head;
+                tail
+            }
+        };
+        run_length = 1;
+
+        let mut literal_length = 1;
+        for elt in literal_tail {
+            literal_length += 1;
+            if *elt == lead {
+                run_length += 1;
+                if run_length >= 4 {
+                    break
+                }
+            } else {
+                lead = *elt;
+                run_length = 1;
+            }
+        }
+        // If we didn't find a long enough run, this literal goes to the end.
+        if run_length < 4 {
+            assert_eq!(literal_length, data.len());
+            leb128::write::unsigned(stream, literal_length as u64)?;
+            stream.write_all(raw::slice_as_bytes(data))?;
+            return Ok(());
+        }
+
+        // Write out this literal, and begin the next run.
+        literal_length -= run_length;
+        leb128::write::unsigned(stream, literal_length as u64)?;
+        stream.write_all(raw::slice_as_bytes(&data[..literal_length]))?;
+        data = &data[literal_length + run_length..];
+    }
+}
+
+#[test]
+fn test_write_rle() {
+    fn check(data: &[u8], rle: &[u8]) {
+        let mut buf = vec![];
+        assert!(write_rle(&data, &mut buf).is_ok());
+        assert_eq!(buf, rle);
+    }
+
+    check(&[], &[]);
+    check(&[1], &[1, 1]);
+    check(&[1, 1], &[2, 1]);
+    check(&[1, 1, 1, 2, 2, 2, 2], &[3, 1, 0, 4, 2]);
+    check(&[1, 2, 3, 4, 5, 6],    &[1, 1, 5, 2, 3, 4, 5, 6]);
+    check(&[1, 2, 3, 3, 3],       &[1, 1, 4, 2, 3, 3, 3]);
+    check(&[1, 2, 3, 3, 3, 3],    &[1, 1, 1, 2, 4, 3]);
+    check(&[1, 2, 3, 3, 3, 3, 3], &[1, 1, 1, 2, 5, 3]);
+
+    check(&[   1,    2,    3, 3, 3, 3, 3,    4, 5],
+          &[1, 1, 1, 2, 5, 3,             2, 4, 5]);
+    check(&[   1,    2,    3, 3, 3, 3,    4, 4, 4, 4,    5, 5, 5, 5],
+          &[1, 1, 1, 2, 4, 3,          0, 4, 4,       0, 4, 5]);
+}
+
+impl<'b, T> DeserializeAs<'b, Vec<T>> for Rle<T>
+    where T: raw::Simple + PartialEq
+{
+    fn deserialize(buf: &mut &'b [u8]) -> Result<Vec<T>, DeserializeError> {
+        let mut output = vec![];
+        loop {
+            if buf.is_empty() {
+                break;
+            }
+
+            // Expand a run.
+            let count = leb128::read::unsigned(buf)? as usize;
+            let bytes = mem::size_of::<T>();
+            if buf.len() < bytes {
+                return Err(DeserializeError::UnexpectedEof);
+            }
+            let value = unsafe {
+                std::ptr::read_unaligned(buf.as_ptr() as *const T)
+            };
+            *buf = &buf[bytes..];
+            output.extend(std::iter::repeat(value).take(count));
+
+            if buf.is_empty() {
+                break;
+            }
+
+            // Expand a literal.
+            let count = leb128::read::unsigned(buf)? as usize;
+
+            // Size of the literal run, in bytes.
+            let bytes = count * mem::size_of::<T>();
+            if buf.len() < bytes {
+                return Err(DeserializeError::UnexpectedEof);
+            }
+            let src = &buf[..bytes];
+            *buf = &buf[bytes..];
+
+            // Extend `output` with the contents of `src`, interpreted as a
+            // slice of `T` values.
+            output.reserve(count);
+            unsafe {
+                let output_next = output.as_mut_ptr().offset(output.len() as isize);
+                let dest = std::slice::from_raw_parts_mut(output_next, count);
+                raw::slice_as_bytes_mut(dest).copy_from_slice(src);
+                output.set_len(output.len() + count);
+            }
+        }
+
+        Ok(output)
+    }
+}
+
+#[test]
+fn test_rle_deserialize() {
+    fn check(mut rle: &[u8], expected: &[u8]) {
+        assert_eq!(<Rle<u8>>::deserialize(&mut rle).unwrap(),
+                   expected);
+    }
+
+    check(&[], &[]);
+    check(&[1, 1], &[1]);
+    check(&[2, 1], &[1, 1]);
+    check(&[3, 1, 0, 4, 2], &[1, 1, 1, 2, 2, 2, 2]);
+    check(&[1, 1, 5, 2, 3, 4, 5, 6],    &[1, 2, 3, 4, 5, 6]);
+    check(&[1, 1, 4, 2, 3, 3, 3],       &[1, 2, 3, 3, 3]);
+    check(&[1, 1, 1, 2, 4, 3],    &[1, 2, 3, 3, 3, 3]);
+    check(&[1, 1, 1, 2, 5, 3], &[1, 2, 3, 3, 3, 3, 3]);
+
+    check(&[1, 1, 1, 2, 5, 3,             2, 4, 5],
+          &[   1,    2,    3, 3, 3, 3, 3,    4, 5]);
+    check(&[1, 1, 1, 2, 4, 3,          0, 4, 4,       0, 4, 5],
+          &[   1,    2,    3, 3, 3, 3,    4, 4, 4, 4,    5, 5, 5, 5]);
+}
+
 #[derive(Debug, Clone)]
 pub enum DeserializeError {
     UnexpectedEof,
     BadUTF8,
+    BadRle,
 }
 
 impl std::fmt::Display for DeserializeError {
@@ -277,8 +441,24 @@ impl std::fmt::Display for DeserializeError {
             DeserializeError::BadUTF8 => {
                 "serialized OpenGL method call argument data included bad UTF-8"
             }
+            DeserializeError::BadRle => {
+                "serialized OpenGL method call argument data included bad run-length encoded data"
+            }
         })
     }
 }
 
 impl std::error::Error for DeserializeError {}
+
+impl From<leb128::read::Error> for DeserializeError {
+    fn from(err: leb128::read::Error) -> DeserializeError {
+        use leb128::read;
+        match err {
+            read::Error::Overflow => DeserializeError::BadRle,
+            read::Error::IoError(io) => {
+                assert_eq!(io.kind(), io::ErrorKind::UnexpectedEof);
+                DeserializeError::UnexpectedEof
+            }
+        }
+    }
+}

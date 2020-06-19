@@ -10,6 +10,7 @@ edition = "2018"
 gleam = { path = "/home/jimb/rust/gleam" }
 docopt = "1.1"
 serde = { version = "1", features = ["derive"] }
+leb128 = "0.2"
 
 [dependencies.image]
 version = "0.23"
