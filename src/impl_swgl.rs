@@ -1,5 +1,6 @@
-use gl_replay::{CallStream, Stream, Parameter};
+use gl_replay::{CallStream, Parameter};
 use gleam::gl::*;
+use std::io::prelude::*;
 use std::os::raw::c_void;
 
 use crate::call::Call;
@@ -127,6 +128,8 @@ impl Swgl for FileRecorder {
         opaque: bool,
         flip: bool,
     ) {
-        simple!(self.composite(src_id, src_x, src_y, src_width, src_height, dst_x, dst_y, opaque, flip))
+        simple!(
+            self.composite(src_id, src_x, src_y, src_width, src_height, dst_x, dst_y, opaque, flip)
+        )
     }
 }

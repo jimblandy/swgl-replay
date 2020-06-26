@@ -12,7 +12,6 @@ Usage:
   swgl-replay <dir>
 ";
 
-
 #[derive(Debug, Deserialize)]
 struct Args {
     arg_dir: String,
@@ -28,7 +27,6 @@ fn main() -> io::Result<()> {
     let swgl = Context::create();
     swgl.make_current();
 
-    ReplayState::from_swgl(swgl).replay(&recording.calls,
-                                        &recording.variable);
+    ReplayState::from_swgl(swgl).replay(&recording.calls, &recording.variable);
     Ok(())
 }

@@ -1,9 +1,10 @@
 use docopt::Docopt;
-use serde::Deserialize;
-use gl_replay::Call as GlCall;
+use gl_replay::pixels::Pixels;
 use gl_replay::replay::Parameter;
-use swgl_replay::FileRecording;
+use gl_replay::Call as GlCall;
+use serde::Deserialize;
 use swgl_replay::Call as SwglCall;
+use swgl_replay::FileRecording;
 
 use std::io;
 
@@ -33,14 +34,10 @@ fn main() -> io::Result<()> {
     let mut count = 0;
     for (i, call) in recording.calls.iter().enumerate() {
         match *call {
-            SwglCall::gl(GlCall::read_pixels_into_buffer {
-                x: _, y: _, width, height, format, pixel_type, dst_buffer
-            }) => {
-                let dst_buffer = <&[u8]>::from_call(dst_buffer, &recording.variable);
+            SwglCall::gl(GlCall::read_pixels_into_buffer { x: _, y: _, pixels }) => {
+                let pixels = Pixels::from_call(pixels, &recording.variable);
                 let filename = format!("read_pixels_into_buffer-{}.png", i);
-                gl_replay::write_image(&filename, &dst_buffer,
-                                       width as usize, height as usize,
-                                       format, pixel_type);
+                pixels.write_image(&filename);
                 count += 1;
             }
             _ => (),

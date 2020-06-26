@@ -7,14 +7,14 @@ use std::ffi::c_void;
 
 pub struct ReplayState {
     swgl: swgl::Context,
-    borrowed_buffers: HashMap<GLuint, Vec<u8>>
+    borrowed_buffers: HashMap<GLuint, Vec<u8>>,
 }
 
 impl ReplayState {
     pub fn from_swgl(swgl: swgl::Context) -> ReplayState {
         ReplayState {
             swgl,
-            borrowed_buffers: HashMap::new()
+            borrowed_buffers: HashMap::new(),
         }
     }
 
@@ -33,13 +33,15 @@ impl ReplayState {
         let call = *call;
         use Call::*;
         match call {
-            gl(gl_call) => {
-                gl_replay::replay_one(&self.swgl, &gl_call, variable, serial)
-            }
+            gl(gl_call) => gl_replay::replay_one(&self.swgl, &gl_call, variable, serial),
             init_default_framebuffer { width, height } => {
                 self.swgl.init_default_framebuffer(width, height)
             }
-            get_color_buffer { fbo, flush, returned: expected } => {
+            get_color_buffer {
+                fbo,
+                flush,
+                returned: expected,
+            } => {
                 //(Var<Seq<u32>>, i32, i32),
                 let expected_buf = {
                     let (buf, width, height) = expected;
@@ -49,9 +51,7 @@ impl ReplayState {
                 let actual = self.swgl.get_color_buffer(fbo, flush);
                 let actual_buf = {
                     let (buf, width, height) = actual;
-                    unsafe {
-                        std::slice::from_raw_parts(buf, width as usize * height as usize)
-                    };
+                    unsafe { std::slice::from_raw_parts(buf, width as usize * height as usize) };
                 };
                 if (expected_buf, expected.1, expected.2) != (actual_buf, actual.1, actual.2) {
                     panic!("get_color_buffer return value doesn't match expectations");
@@ -78,26 +78,30 @@ impl ReplayState {
                         buf
                     }
                 };
-                self.swgl.set_texture_buffer(tex, internal_format, width, height,
-                                             buf, min_width, min_height)
+                self.swgl.set_texture_buffer(
+                    tex,
+                    internal_format,
+                    width,
+                    height,
+                    buf,
+                    min_width,
+                    min_height,
+                )
             }
 
             composite {
-                src_id, // : GLuint,
-                src_x, // : GLint,
-                src_y, // : GLint,
-                src_width, // : GLsizei,
+                src_id,     // : GLuint,
+                src_x,      // : GLint,
+                src_y,      // : GLint,
+                src_width,  // : GLsizei,
                 src_height, // : GLint,
-                dst_x, // : GLint,
-                dst_y, // : GLint,
-                opaque, // : bool,
-                flip, // : bool,
-            } => {
-                self.swgl.composite(src_id, src_x, src_y, src_width, src_height,
-                                    dst_x, dst_y, opaque, flip)
-            }
+                dst_x,      // : GLint,
+                dst_y,      // : GLint,
+                opaque,     // : bool,
+                flip,       // : bool,
+            } => self.swgl.composite(
+                src_id, src_x, src_y, src_width, src_height, dst_x, dst_y, opaque, flip,
+            ),
         }
     }
 }
-
-

@@ -1,10 +1,10 @@
 //! The `swgl_replay::Call` type.
 
-use gleam::gl::{GLenum, GLint, GLsizei, GLuint};
-use gl_replay::form::{Var, Seq};
+use gl_replay::form::{Seq, Var};
 use gl_replay::raw;
+use gleam::gl::{GLenum, GLint, GLsizei, GLuint};
 
-unsafe impl raw::Simple for Call { }
+unsafe impl raw::Simple for Call {}
 
 impl From<gl_replay::Call> for Call {
     fn from(gl_call: gl_replay::Call) -> Call {
