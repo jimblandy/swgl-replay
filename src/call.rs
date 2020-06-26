@@ -7,6 +7,7 @@ use gleam::gl::{
 use std::os::raw::c_int;
 
 use crate::form::{Var, Seq, Str};
+use crate::pixels::PixelsForm;
 use crate::raw;
 
 unsafe impl raw::Simple for Call { }
@@ -146,7 +147,7 @@ pub enum Call {
     invalidate_framebuffer { target: GLenum, attachments: Var<Seq<GLenum>> },
     invalidate_sub_framebuffer { target: GLenum, attachments: Var<Seq<GLenum>>, xoffset: GLint, yoffset: GLint, width: GLsizei, height: GLsizei },
     read_buffer { mode: GLenum },
-    read_pixels_into_buffer { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum, dst_buffer: Var<Seq<u8>> },
+    read_pixels_into_buffer { x: GLint, y: GLint, pixels: Var<PixelsForm> },
     read_pixels { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum, returned: Var<Seq<u8>> },
     read_pixels_into_pbo { x: GLint, y: GLint, width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum },
     sample_coverage { value: GLclampf, invert: bool },

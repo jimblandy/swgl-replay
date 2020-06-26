@@ -5,6 +5,7 @@ use std::os::raw::{c_int, c_void};
 
 use crate::call::{Call, TexImageData};
 use crate::var::CallStream;
+use crate::pixels;
 use super::Recorder;
 use crate::Parameter;
 
@@ -192,8 +193,26 @@ where G: Gl,
         pixel_type: GLenum,
         dst_buffer: &mut [u8],
     ) {
-        simple!(
-            self.read_pixels_into_buffer(x, y, width, height, format, pixel_type, dst_buffer)
+        general!(
+            let _unit = self.read_pixels_into_buffer(x, y, width, height, format, pixel_type, dst_buffer);
+            lock call_stream;
+            {
+                let pixels = pixels::Pixels {
+                    width: width as usize,
+                    height: height as usize,
+                    depth: 1,
+                    format,
+                    pixel_type,
+                    bytes: std::borrow::Cow::from(&*dst_buffer),
+                };
+                let call = Call::read_pixels_into_buffer {
+                    x,
+                    y,
+                    pixels: check!(pixels.to_call(call_stream)),
+                };
+
+                check!(call_stream.write_call(call));
+            }
         )
     }
 

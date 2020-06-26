@@ -2,6 +2,7 @@
 
 use crate::form::{Var, Seq, Str};
 use crate::var::{Serialize, MarkedWrite};
+use crate::pixels;
 
 use std::io;
 
@@ -65,6 +66,13 @@ impl<T: Serialize> Parameter for Vec<T> {
 impl Parameter for str {
     type Form = Var<Str>;
 
+    fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
+        Ok(Var::new(self.serialize(stream)?))
+    }
+}
+
+impl Parameter for pixels::Pixels<'_> {
+    type Form = Var<pixels::PixelsForm>;
     fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
         Ok(Var::new(self.serialize(stream)?))
     }

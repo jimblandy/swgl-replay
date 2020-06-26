@@ -10,7 +10,7 @@ use crate::form::{Var, Seq, Str};
 use crate::var::DeserializeAs;
 use crate::raw;
 use crate::FileRecording;
-use crate::write_image;
+use crate::pixels::{Pixels, PixelsForm};
 
 /// A `Gl` method argument type.
 ///
@@ -74,6 +74,14 @@ impl<'v> Parameter<'v, Var<Str>> for &'v str {
         let mut variable = &variable[in_call.offset()..];
         <Str>::deserialize(&mut variable)
             .expect("deserializing &str parameter failed")
+    }
+}
+
+impl<'v> Parameter<'v, Var<PixelsForm>> for Pixels<'static> {
+    fn from_call(in_call: Var<PixelsForm>, variable: &'v [u8]) -> Pixels<'static> {
+        let mut variable = &variable[in_call.offset()..];
+        <PixelsForm>::deserialize(&mut variable)
+            .expect("deserializing Pixels parameter failed")
     }
 }
 
@@ -747,28 +755,25 @@ fn replay_one_with_locals(locals: &Locals, call: &Call) {
         height,
     ); }*/
         read_buffer { mode } => { gl.read_buffer(mode); }
-        read_pixels_into_buffer {
-            x,
-            y,
-            width,
-            height,
-            format,
-            pixel_type,
-            dst_buffer,
-        } => {
-            let expected = get_slice(dst_buffer, locals.variable);
+        read_pixels_into_buffer { x, y, pixels } => {
+            let pixels = Pixels::from_call(pixels, locals.variable);
+            assert_eq!(pixels.depth, 1);
+            let expected = pixels.bytes.as_ref();
             let mut actual = expected.to_owned();
-            gl.read_pixels_into_buffer(x, y, width, height, format, pixel_type, &mut actual);
+            gl.read_pixels_into_buffer(x, y,
+                                       pixels.width as GLsizei,
+                                       pixels.height as GLsizei,
+                                       pixels.format, pixels.pixel_type,
+                                       &mut actual);
             if expected != &actual[..] {
                 eprintln!("gl-replay: method read_pixels_into_buffer (serial {}) returned unexpected value",
                           locals.serial);
-                write_image("expected.png", expected, width as usize, height as usize, format, pixel_type);
-                write_image("actual.png", &actual, width as usize, height as usize, format, pixel_type);
+                let actual = Pixels { bytes: std::borrow::Cow::from(actual), ..pixels };
+                pixels.write_image("expected.png");
+                actual.write_image("actual.png");
                 eprintln!("Comparison images saved to 'expected.png' and 'actual.png'");
                 panic!("replay cannot proceed");
             }
-            check_filled_slice!(locals: read_pixels_into_buffer(x, y, width, height, format, pixel_type):
-                                dst_buffer)
         }
         read_pixels {
             x,

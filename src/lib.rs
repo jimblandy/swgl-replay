@@ -59,9 +59,6 @@ pub mod pixels;
 pub mod replay;
 pub use replay::{replay, replay_one};
 
-mod write_image;
-pub use write_image::write_image;
-
 /// A `gleam::Gl` implementation that records calls to files.
 type FileRecorder<G> = Recorder<G, FileStream<Call>>;
 
