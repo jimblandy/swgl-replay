@@ -3,4 +3,4 @@ Cargo.lock
 expected.png
 actual.png
 read_pixels_into_buffer-*.png
-
+perf.data*
