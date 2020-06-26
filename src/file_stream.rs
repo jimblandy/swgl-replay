@@ -125,25 +125,20 @@ fn read_vector<T: Simple>(
     // Allocate a vector of the appropriate capacity. We just checked that this
     // division will have no remainder.
     let len = bytes / mem::size_of::<T>();
+
     let mut vec = Vec::with_capacity(len);
-
-    // Make sure that this vector's buffer is properly aligned. All vector
-    // buffers should be...
-    if bytes != 0 {
-        assert!(vec.as_ptr() as *const () as usize & alignment - 1 == 0);
-    }
-
-    // Get a slice referring to the portion of vector's unused capacity that
-    // we'll populate.
-    let elt_slice = unsafe { std::slice::from_raw_parts_mut(vec.as_mut_ptr(), len) };
-    // But as bytes, as read_exact expects.
-    let byte_slice = unsafe { raw::slice_as_bytes_mut(elt_slice) };
-
-    file.read_exact(byte_slice)?;
-
-    // Set the vector's length to enclose the part we've now initialized.
     unsafe {
-        vec.set_len(len);
+        raw::try_extend_vec_uninit(&mut vec, len, |elt_slice| -> io::Result<()> {
+            // Make sure that this vector's buffer is properly aligned. All vector
+            // buffers should be...
+            if bytes != 0 {
+                assert!(elt_slice.as_ptr() as *const () as usize & alignment - 1 == 0);
+            }
+
+            let byte_slice = raw::slice_as_bytes_mut(elt_slice);
+            // unstable: file.initializer().initialize(byte_slice);
+            file.read_exact(byte_slice)
+        })?;
     }
 
     Ok(vec)

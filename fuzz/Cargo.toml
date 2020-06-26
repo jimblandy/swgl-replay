@@ -20,7 +20,13 @@ path = ".."
 members = ["."]
 
 [[bin]]
-name = "rle"
-path = "fuzz_targets/rle.rs"
+name = "rle_u8"
+path = "fuzz_targets/rle_u8.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "rle_u32"
+path = "fuzz_targets/rle_u32.rs"
 test = false
 doc = false

@@ -53,6 +53,8 @@ pub use recorder::Recorder;
 pub mod raw;
 pub mod var;
 pub use var::{CallStream, MarkedWrite};
+pub mod rle;
+pub mod pixels;
 
 pub mod replay;
 pub use replay::{replay, replay_one};
