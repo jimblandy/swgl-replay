@@ -112,7 +112,7 @@ fn call_to_tex_image_data_offset<'v>(in_call: TexImageData, variable: &'v [u8]) 
 }
 
 macro_rules! simple {
-    ( $locals:ident : $method:ident ( $( $arg:ident ),* ) ) =>
+    ( $locals:ident : $method:ident ( $( $arg:ident ),* $(,)? ) ) =>
     {
         {
             $locals .gl. $method (
