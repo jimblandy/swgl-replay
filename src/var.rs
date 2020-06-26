@@ -52,7 +52,8 @@ pub trait MarkedWrite: io::Write {
     /// starting with padding as needed to align it properly for elements of
     /// type `T`. Return its start position, after any padding.
     fn marked_write_all_aligned<T>(&mut self, slice: &[T]) -> io::Result<usize>
-    where T: raw::Simple
+    where
+        T: raw::Simple,
     {
         self.align_for::<T>()?;
         let pos = self.mark();
@@ -82,7 +83,7 @@ pub trait MarkedWrite: io::Write {
 /// a `&[Call]` slice from the data, with no per-element serialization needed.
 /// The `Call` parameter should be something suitably simple (`Copy`, at least),
 /// to make this possible.
-pub trait CallStream<Call> : MarkedWrite {
+pub trait CallStream<Call>: MarkedWrite {
     /// Append the contents of the buffer `buf` to the data stream. Return the
     /// serial number of the call just written.
     fn write_call(&mut self, call: Call) -> io::Result<usize>;
@@ -161,10 +162,9 @@ macro_rules! implement_serialize_for_simple {
     }
 }
 
-implement_serialize_for_simple!(u8, u16, u32, u64, u128, usize,
-                                i8, i16, i32, i64, i128, isize,
-                                f32, f64,
-                                char, bool);
+implement_serialize_for_simple!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, char, bool
+);
 
 impl<'b, T: raw::Simple + 'b> DeserializeAs<'b, T> for T {
     fn deserialize(buf: &mut &'b [u8]) -> Result<T, DeserializeError> {
@@ -174,8 +174,7 @@ impl<'b, T: raw::Simple + 'b> DeserializeAs<'b, T> for T {
 
 /// Slices are serialized using the `Seq` form: the length as a `usize`,
 /// followed by the elements, all padded as necessary for alignment.
-impl<T: Serialize> Serialize for [T]
-{
+impl<T: Serialize> Serialize for [T] {
     type Form = Seq<T::Form>;
     fn serialize<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<usize> {
         // Let the element type choose how to write the slice.
@@ -207,7 +206,8 @@ impl<T: Serialize> Serialize for Vec<T> {
 }
 
 impl<'b, F, T> DeserializeAs<'b, Vec<T>> for Seq<F>
-    where F: DeserializeAs<'b, T>
+where
+    F: DeserializeAs<'b, T>,
 {
     fn deserialize(buf: &mut &'b [u8]) -> Result<Vec<T>, DeserializeError> {
         // I thought it would be cool if we could grab a slice and call
@@ -257,8 +257,7 @@ pub fn borrow_aligned_slice<'b, T: raw::Simple>(
     }
 
     // Safe because `T : raw::Simple`.
-    let slice =
-        unsafe { std::slice::from_raw_parts(buf[align_skip..].as_ptr() as *const T, len) };
+    let slice = unsafe { std::slice::from_raw_parts(buf[align_skip..].as_ptr() as *const T, len) };
 
     *buf = &buf[full_size..];
     Ok(slice)
@@ -280,9 +279,7 @@ impl std::fmt::Display for DeserializeError {
             DeserializeError::BadUTF8 => {
                 fmt.write_str("serialized OpenGL method call argument data included bad UTF-8")
             }
-            DeserializeError::Leb128ReadError(err) => {
-                err.fmt(fmt)
-            }
+            DeserializeError::Leb128ReadError(err) => err.fmt(fmt),
         }
     }
 }

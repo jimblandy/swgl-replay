@@ -41,7 +41,7 @@ mod call;
 pub use call::Call;
 
 mod file_stream;
-pub use file_stream::{FileStream, FileRecording};
+pub use file_stream::{FileRecording, FileStream};
 
 pub mod form;
 mod parameter;
@@ -53,8 +53,8 @@ pub use recorder::Recorder;
 pub mod raw;
 pub mod var;
 pub use var::{CallStream, MarkedWrite};
-pub mod rle;
 pub mod pixels;
+pub mod rle;
 
 pub mod replay;
 pub use replay::{replay, replay_one};
@@ -72,4 +72,5 @@ impl<G: gl::Gl> FileRecorder<G> {
 }
 
 /// The magic number used to identify `gleam::Gl` file recordings.
-pub const GL_MAGIC: u32 = (((b'G' as u32) << 8 | (b'L' as u32)) << 8 | (b'R' as u32)) << 8 | (b'R' as u32);
+pub const GL_MAGIC: u32 =
+    (((b'G' as u32) << 8 | (b'L' as u32)) << 8 | (b'R' as u32)) << 8 | (b'R' as u32);

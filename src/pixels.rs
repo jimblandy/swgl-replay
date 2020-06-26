@@ -7,13 +7,13 @@
 //! A `Pixels` value can be serialized and deserialized using the `var` module's
 //! traits. Its serialized form is `PixelsForm`.
 
-use crate::{var, rle};
+use crate::{rle, var};
 
 use gleam::gl;
-use image::ColorType;
 use image::png::PNGEncoder;
-use std::{fs, io, mem, path};
+use image::ColorType;
 use std::borrow::Cow;
+use std::{fs, io, mem, path};
 
 /// A deserialized block of pixels.
 pub struct Pixels<'a> {
@@ -76,8 +76,10 @@ impl var::Serialize for Pixels<'_> {
         leb128::write::unsigned(stream, self.pixel_type as u64)?;
 
         let bytes_per_pixel = gl::calculate_bytes_per_pixel(self.format, self.pixel_type);
-        assert_eq!(bytes_per_pixel * self.width * self.height * self.depth,
-                   self.bytes.len());
+        assert_eq!(
+            bytes_per_pixel * self.width * self.height * self.depth,
+            self.bytes.len()
+        );
 
         let mut compressed: Vec<u8> = Vec::new();
         match bytes_per_pixel {
@@ -87,8 +89,10 @@ impl var::Serialize for Pixels<'_> {
             4 => {
                 assert!(self.bytes.len() % mem::align_of::<u32>() == 0);
                 let slice = unsafe {
-                    std::slice::from_raw_parts(self.bytes.as_ptr() as *const u32,
-                                               self.bytes.len() / mem::size_of::<u32>())
+                    std::slice::from_raw_parts(
+                        self.bytes.as_ptr() as *const u32,
+                        self.bytes.len() / mem::size_of::<u32>(),
+                    )
                 };
                 rle::write_u32(&mut compressed, slice)?;
             }
@@ -143,18 +147,22 @@ impl Pixels<'_> {
     pub fn write_image<P: AsRef<path::Path>>(&self, path: P) {
         let color_type = match (self.format, self.pixel_type) {
             (gl::RGBA, gl::UNSIGNED_BYTE) => ColorType::Rgba8,
-            _ => panic!("gl-replay: Pixels::write_image: \
+            _ => panic!(
+                "gl-replay: Pixels::write_image: \
                          unsupported format/pixel type combination: 0x{:x}, 0x{:x}",
-                        self.format, self.pixel_type),
+                self.format, self.pixel_type
+            ),
         };
 
-        let file = fs::File::create(path)
-            .expect("gl-replay: write_image: error creating file");
+        let file = fs::File::create(path).expect("gl-replay: write_image: error creating file");
         let encoder = PNGEncoder::new(file);
-        encoder.encode(self.bytes.as_ref(),
-                       self.width as u32,
-                       self.height as u32,
-                       color_type)
+        encoder
+            .encode(
+                self.bytes.as_ref(),
+                self.width as u32,
+                self.height as u32,
+                color_type,
+            )
             .expect("gl-replay: write_image: error writing file");
     }
 }

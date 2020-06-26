@@ -15,7 +15,7 @@ pub struct FileStream<Call> {
     bytes_written: usize,
     call_serial: usize,
     size_limit: usize,
-    _phantom: std::marker::PhantomData<Call>
+    _phantom: std::marker::PhantomData<Call>,
 }
 
 impl<Call: Simple> FileStream<Call> {
@@ -79,8 +79,9 @@ impl<Call> MarkedWrite for FileStream<Call> {
 }
 
 impl<Stored, Passed> CallStream<Passed> for FileStream<Stored>
-    where Stored: Simple,
-          Passed: Into<Stored>
+where
+    Stored: Simple,
+    Passed: Into<Stored>,
 {
     fn write_call(&mut self, call: Passed) -> io::Result<usize> {
         let call = call.into();
@@ -153,7 +154,7 @@ impl<Call: Simple> FileRecording<Call> {
         if calls_file.metadata()?.len() == 0 {
             return Err(io::Error::new(io::ErrorKind::Other,
                                       "gl-replay calls file is zero-length.\n\
-                                       Are you recording to the same file you're trying to replay from?"))
+                                       Are you recording to the same file you're trying to replay from?"));
         }
 
         let mut header = Header::zeros();
@@ -167,7 +168,13 @@ impl<Call: Simple> FileRecording<Call> {
 
         let alignment = max_alignment::<Call>();
         Ok(FileRecording {
-            calls: read_vector(calls_file, mem::size_of_val(&header), alignment, "calls", "Call")?,
+            calls: read_vector(
+                calls_file,
+                mem::size_of_val(&header),
+                alignment,
+                "calls",
+                "Call",
+            )?,
             variable: read_vector(variable_file, 0, alignment, "variable", "byte")?,
         })
     }
@@ -185,7 +192,7 @@ struct Header {
     padding: u8,
 }
 
-unsafe impl Simple for Header { }
+unsafe impl Simple for Header {}
 
 fn max_alignment<Call: Copy>() -> usize {
     // A type whose alignment is as strict as we need. Add more types to
@@ -231,10 +238,12 @@ impl Header {
         let mut expected = Header::for_call::<Call>(magic);
         expected.padding = self.padding;
         if expected != *self {
-            let msg = format!("gl-replay header does not match:\n\
+            let msg = format!(
+                "gl-replay header does not match:\n\
                                expected: {:?}\n\
                                actual:   {:?}\n",
-                              expected, self);
+                expected, self
+            );
             return Err(io::Error::new(io::ErrorKind::Other, msg));
         }
         Ok(())

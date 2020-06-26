@@ -6,7 +6,7 @@
 /// `&` altogether. `Var<str>` is okay.
 pub struct Var<T> {
     offset: usize,
-    _referent: std::marker::PhantomData<*const T>
+    _referent: std::marker::PhantomData<*const T>,
 }
 
 /// A sequence of values: slices, vectors, strings.
@@ -15,7 +15,7 @@ pub struct Var<T> {
 /// of that many values.
 #[derive(Clone, Copy, Debug)]
 pub struct Seq<T> {
-    _referent: std::marker::PhantomData<*const T>
+    _referent: std::marker::PhantomData<*const T>,
 }
 
 /// A UTF-8 string.
@@ -38,14 +38,14 @@ pub struct Str;
 /// by a literal or the end of the data. A literal is always followed by a run
 /// or the end of the data.
 pub struct Rle<T> {
-    _referent: std::marker::PhantomData<*const T>
+    _referent: std::marker::PhantomData<*const T>,
 }
 
 impl<T> Var<T> {
     pub fn new(offset: usize) -> Var<T> {
         Var {
             offset,
-            _referent: Default::default()
+            _referent: Default::default(),
         }
     }
 
@@ -65,7 +65,7 @@ impl<T> Clone for Var<T> {
     }
 }
 
-impl<T> Copy for Var<T> { }
+impl<T> Copy for Var<T> {}
 
 impl<T> std::fmt::Debug for Var<T> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {

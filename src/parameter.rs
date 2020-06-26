@@ -1,8 +1,8 @@
 //! Serializing parameters to `Gl` calls.
 
-use crate::form::{Var, Seq, Str};
-use crate::var::{Serialize, MarkedWrite};
+use crate::form::{Seq, Str, Var};
 use crate::pixels;
+use crate::var::{MarkedWrite, Serialize};
 
 use std::io;
 
@@ -42,10 +42,9 @@ macro_rules! direct_parameters {
     }
 }
 
-direct_parameters!(u8, u16, u32, u64, u128, usize,
-                   i8, i16, i32, i64, i128, isize,
-                   f32, f64,
-                   char, bool);
+direct_parameters!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, char, bool
+);
 
 impl<T: Serialize> Parameter for [T] {
     type Form = Var<Seq<T::Form>>;
@@ -104,8 +103,6 @@ impl<T: Parameter> Parameter for Option<T> {
     type Form = Option<T::Form>;
 
     fn to_call<S: MarkedWrite>(&self, stream: &mut S) -> io::Result<Self::Form> {
-        self.as_ref()
-            .map(|param| param.to_call(stream))
-            .transpose() // from `Option<Result>` to `Result<Option>`
+        self.as_ref().map(|param| param.to_call(stream)).transpose() // from `Option<Result>` to `Result<Option>`
     }
 }

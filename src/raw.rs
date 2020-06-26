@@ -12,7 +12,7 @@
 /// This is stricter than `Copy + 'static`: for example, `&'static str` meets
 /// those bounds and yet is not `Simple`, because an address is only meaningful
 /// in the address space in which it's created.
-pub unsafe trait Simple: Copy { }
+pub unsafe trait Simple: Copy {}
 
 /// Given a reference, return a byte slice of the value's representation.
 pub fn as_bytes<T: Simple>(r: &T) -> &[u8] {
@@ -45,10 +45,11 @@ pub unsafe fn slice_as_bytes_mut<T: Simple>(r: &mut [T]) -> &mut [u8] {
 pub unsafe fn try_extend_vec_uninit<T, F, U, V>(
     vec: &mut Vec<T>,
     additional: usize,
-    initializer: F
+    initializer: F,
 ) -> Result<U, V>
-where T: Simple,
-      F: FnOnce(&mut [T]) -> Result<U, V>
+where
+    T: Simple,
+    F: FnOnce(&mut [T]) -> Result<U, V>,
 {
     vec.reserve(additional);
     let free = vec.as_mut_ptr().offset(vec.len() as isize);
@@ -65,18 +66,16 @@ where T: Simple,
 /// `vec`'s length to include the now-initialized elements.
 ///
 /// Safety: the caller must initialize every element of the slice to a valid `T`.
-pub unsafe fn extend_vec_uninit<T, F>(
-    vec: &mut Vec<T>,
-    additional: usize,
-    initializer: F
-)
-where T: Simple,
-      F: FnOnce(&mut [T])
+pub unsafe fn extend_vec_uninit<T, F>(vec: &mut Vec<T>, additional: usize, initializer: F)
+where
+    T: Simple,
+    F: FnOnce(&mut [T]),
 {
     try_extend_vec_uninit(vec, additional, |slice| -> Result<(), ()> {
         initializer(slice);
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 }
 
 macro_rules! implement_simple {
@@ -87,7 +86,6 @@ macro_rules! implement_simple {
     }
 }
 
-implement_simple!(u8, u16, u32, u64, u128, usize,
-                  i8, i16, i32, i64, i128, isize,
-                  f32, f64,
-                  char, bool);
+implement_simple!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64, char, bool
+);

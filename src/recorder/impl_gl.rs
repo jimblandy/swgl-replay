@@ -3,10 +3,10 @@
 use gleam::gl::*;
 use std::os::raw::{c_int, c_void};
 
-use crate::call::{Call, TexImageData};
-use crate::var::CallStream;
-use crate::pixels;
 use super::Recorder;
+use crate::call::{Call, TexImageData};
+use crate::pixels;
+use crate::var::CallStream;
 use crate::Parameter;
 
 macro_rules! check {
@@ -15,17 +15,19 @@ macro_rules! check {
     };
 }
 
-fn tex_image_data_to_call<G, Cs>(inner_gl: &G,
-                                 call_stream: &mut Cs,
-                                 width: GLsizei,
-                                 height: GLsizei,
-                                 depth: GLsizei,
-                                 format: GLenum,
-                                 ty: GLenum,
-                                 offset: usize)
-    -> TexImageData
-where G: gleam::gl::Gl,
-      Cs: CallStream<Call>
+fn tex_image_data_to_call<G, Cs>(
+    inner_gl: &G,
+    call_stream: &mut Cs,
+    width: GLsizei,
+    height: GLsizei,
+    depth: GLsizei,
+    format: GLenum,
+    ty: GLenum,
+    offset: usize,
+) -> TexImageData
+where
+    G: gleam::gl::Gl,
+    Cs: CallStream<Call>,
 {
     // If there is a buffer bound to PIXEL_UNPACK_BUFFER, then `offset` is an
     // offset; otherwise, it's an address.
@@ -37,9 +39,7 @@ where G: gleam::gl::Gl,
         TexImageData::Offset(offset)
     } else {
         let length = gleam::gl::calculate_length(width, height, depth, format, ty);
-        let slice = unsafe {
-            std::slice::from_raw_parts(offset as *const u8, length)
-        };
+        let slice = unsafe { std::slice::from_raw_parts(offset as *const u8, length) };
         TexImageData::Buf(check!(slice.to_call(call_stream)))
     }
 }
@@ -112,8 +112,9 @@ macro_rules! simple_with_return_value {
 
 #[allow(unused_variables)]
 impl<G, Cs> gleam::gl::Gl for Recorder<G, Cs>
-where G: Gl,
-      Cs: CallStream<Call>
+where
+    G: Gl,
+    Cs: CallStream<Call>,
 {
     fn get_type(&self) -> GlType {
         no_side_effect!(self.get_type())

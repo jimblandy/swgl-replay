@@ -1,16 +1,14 @@
 //! A representation for recorded `gleam::Gl` method calls.
 
-use gleam::gl::{
-    GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLuint,
-};
+use gleam::gl::{GLbitfield, GLclampf, GLenum, GLfloat, GLint, GLsizei, GLuint};
 
 use std::os::raw::c_int;
 
-use crate::form::{Var, Seq, Str};
+use crate::form::{Seq, Str, Var};
 use crate::pixels::PixelsForm;
 use crate::raw;
 
-unsafe impl raw::Simple for Call { }
+unsafe impl raw::Simple for Call {}
 
 /// Either a buffer, or an offset into the currently bound PIXEL_UNPACK_BUFFER.
 ///

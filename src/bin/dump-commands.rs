@@ -2,8 +2,8 @@ use docopt::Docopt;
 use serde::Deserialize;
 use std::io;
 
-use gl_replay::FileRecording;
 use gl_replay::Call;
+use gl_replay::FileRecording;
 
 type Recording = FileRecording<Call>;
 

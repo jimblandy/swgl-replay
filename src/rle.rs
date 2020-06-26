@@ -43,10 +43,9 @@ pub fn write_u8<S>(stream: &mut S, data: &[u8]) -> Result<(), io::Error>
 where
     S: io::Write,
 {
-    write_general(stream, data,
-                  |stream, count| {
-                      leb128::write::unsigned(stream, count as u64)
-                  })
+    write_general(stream, data, |stream, count| {
+        leb128::write::unsigned(stream, count as u64)
+    })
 }
 
 /// Write a slice of `u32` values with run-length encoding.
@@ -57,11 +56,10 @@ pub fn write_u32<S>(stream: &mut S, data: &[u32]) -> Result<(), io::Error>
 where
     S: io::Write,
 {
-    write_general(stream, data,
-                  |stream, count| {
-                      let count = count as u32;
-                      stream.write_all(raw::as_bytes(&count))
-                  })
+    write_general(stream, data, |stream, count| {
+        let count = count as u32;
+        stream.write_all(raw::as_bytes(&count))
+    })
 }
 
 /// Write a generic slice of values with run-length encoding.
@@ -179,10 +177,7 @@ fn test_write_u32() {
         }
         assert!(bytes.len() & (std::mem::size_of::<u32>() - 1) == 0);
         assert!(bytes.as_ptr() as usize & (std::mem::align_of::<u32>() - 1) == 0);
-        unsafe {
-            std::slice::from_raw_parts(bytes.as_ptr() as *const u32,
-                                       bytes.len() / 4)
-        }
+        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, bytes.len() / 4) }
     }
 
     fn check(data: &[u32], rle: &[u32]) {
@@ -236,10 +231,7 @@ impl RleSink<u32> for Vec<u8> {
     fn write_run(&mut self, value: u32, count: usize) -> Result<(), Self::Error> {
         unsafe {
             raw::extend_vec_uninit(self, count * mem::size_of::<u32>(), move |slice| {
-                let slice = std::slice::from_raw_parts_mut(
-                    slice.as_mut_ptr() as *mut u32,
-                    count
-                );
+                let slice = std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut u32, count);
                 slice.iter_mut().for_each(|elt| *elt = value);
             });
         }
@@ -249,10 +241,7 @@ impl RleSink<u32> for Vec<u8> {
         let count = values.len();
         unsafe {
             raw::extend_vec_uninit(self, count * mem::size_of::<u32>(), move |slice| {
-                let slice = std::slice::from_raw_parts_mut(
-                    slice.as_mut_ptr() as *mut u32,
-                    count
-                );
+                let slice = std::slice::from_raw_parts_mut(slice.as_mut_ptr() as *mut u32, count);
                 slice.copy_from_slice(values);
             });
         }
@@ -272,16 +261,12 @@ pub fn read_u8(buf: &mut &[u8]) -> Result<Vec<u8>, DeserializeError> {
 /// Read run-length encoded `u32` values from `buf`, returning a `Vec<u8>`.
 pub fn read_u32(buf: &mut &[u32]) -> Result<Vec<u8>, DeserializeError> {
     let mut expanded = Vec::new();
-    read_general(buf, &mut expanded, |buf| {
-        match buf.split_first() {
-            Some((head, tail)) => {
-                *buf = tail;
-                Ok(*head as usize)
-            }
-            None => {
-                Err(DeserializeError::UnexpectedEof)
-            }
+    read_general(buf, &mut expanded, |buf| match buf.split_first() {
+        Some((head, tail)) => {
+            *buf = tail;
+            Ok(*head as usize)
         }
+        None => Err(DeserializeError::UnexpectedEof),
     })?;
     Ok(expanded)
 }
@@ -289,11 +274,15 @@ pub fn read_u32(buf: &mut &[u32]) -> Result<Vec<u8>, DeserializeError> {
 /// Read run-length encoded data from `buf`, and write it to `sink`.
 ///
 /// Use `read_count` to parse read counts from `buf`.
-pub fn read_general<T, R, S>(buf: &mut &[T], sink: &mut S, mut read_count: R) -> Result<(), S::Error>
+pub fn read_general<T, R, S>(
+    buf: &mut &[T],
+    sink: &mut S,
+    mut read_count: R,
+) -> Result<(), S::Error>
 where
     T: raw::Simple + PartialEq,
     R: FnMut(&mut &[T]) -> Result<usize, DeserializeError>,
-    S: RleSink<T>
+    S: RleSink<T>,
 {
     loop {
         if buf.is_empty() {

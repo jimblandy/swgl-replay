@@ -10,7 +10,6 @@ pub struct Recorder<G, Cs> {
     inner_gl: G,
 
     /// The CallStream to which we record calls to `inner_gl`.
-
     // I assume complex recording designs will have a single call stream shared
     // by various recorders, and implementing `CallStream<T>` for various call
     // types T. In that case, it would make sense for this to be an
@@ -22,7 +21,7 @@ impl<G, Cs> Recorder<G, Cs> {
     pub fn new(inner_gl: G, call_stream: Cs) -> Recorder<G, Cs> {
         Recorder {
             inner_gl,
-            call_stream: sync::Mutex::new(call_stream)
+            call_stream: sync::Mutex::new(call_stream),
         }
     }
 
