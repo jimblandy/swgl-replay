@@ -15,14 +15,21 @@ pub struct Recorder<G, Cs> {
     // types T. In that case, it would make sense for this to be an
     // `Arc<Mutex<Cs>>`. But we don't need that for SWGL.
     call_stream: sync::Mutex<Cs>,
+
+    fingerprinter: Option<fn(&G, &mut Cs)>,
 }
 
 impl<G, Cs> Recorder<G, Cs> {
-    pub fn new(inner_gl: G, call_stream: Cs) -> Recorder<G, Cs> {
+    pub fn with_fingerprinter(inner_gl: G, call_stream: Cs, fingerprinter: Option<fn(&G, &mut Cs)>) -> Recorder<G, Cs> {
         Recorder {
             inner_gl,
             call_stream: sync::Mutex::new(call_stream),
+            fingerprinter
         }
+    }
+
+    pub fn new(inner_gl: G, call_stream: Cs) -> Recorder<G, Cs> {
+        Recorder::with_fingerprinter(inner_gl, call_stream, None)
     }
 
     pub fn inner_gl(&self) -> &G {

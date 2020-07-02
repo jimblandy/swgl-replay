@@ -10,10 +10,9 @@
 use crate::{rle, var};
 
 use gleam::gl;
-use image::png::PNGEncoder;
-use image::ColorType;
+use image::{DynamicImage, ImageBuffer, Bgra, Rgba};
 use std::borrow::Cow;
-use std::{fs, io, mem, path};
+use std::{io, mem, path};
 
 /// A deserialized block of pixels.
 pub struct Pixels<'a> {
@@ -145,8 +144,27 @@ impl<'b> var::DeserializeAs<'b, Pixels<'static>> for PixelsForm {
 
 impl Pixels<'_> {
     pub fn write_image<P: AsRef<path::Path>>(&self, path: P) {
-        let color_type = match (self.format, self.pixel_type) {
-            (gl::RGBA, gl::UNSIGNED_BYTE) => ColorType::Rgba8,
+        if self.depth != 1 {
+            eprintln!("Warning: skipping deep image '{}'",
+                      path.as_ref().display());
+            return;
+        }
+
+        let image = match (self.format, self.pixel_type) {
+            (gl::RGBA, gl::UNSIGNED_BYTE) => {
+                let image = ImageBuffer::<Rgba<u8>, Vec<u8>>::from_raw(self.width as u32,
+                                                                     self.height as u32,
+                                                                     self.bytes.as_ref().to_owned())
+                    .expect("failed to construct image");
+                DynamicImage::ImageRgba8(image)
+            }
+            (gl::BGRA, gl::UNSIGNED_BYTE) => {
+                let image = ImageBuffer::<Bgra<u8>, Vec<u8>>::from_raw(self.width as u32,
+                                                                     self.height as u32,
+                                                                     self.bytes.as_ref().to_owned())
+                    .expect("failed to construct image");
+                DynamicImage::ImageBgra8(image)
+            }
             _ => panic!(
                 "gl-replay: Pixels::write_image: \
                          unsupported format/pixel type combination: 0x{:x}, 0x{:x}",
@@ -154,15 +172,8 @@ impl Pixels<'_> {
             ),
         };
 
-        let file = fs::File::create(path).expect("gl-replay: write_image: error creating file");
-        let encoder = PNGEncoder::new(file);
-        encoder
-            .encode(
-                self.bytes.as_ref(),
-                self.width as u32,
-                self.height as u32,
-                color_type,
-            )
-            .expect("gl-replay: write_image: error writing file");
+        let image = image.into_rgba();
+        image.save(path)
+            .expect("gl-replay: write_image: error creating file");
     }
 }

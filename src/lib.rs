@@ -38,7 +38,7 @@ use std::io;
 use std::path::Path;
 
 mod call;
-pub use call::Call;
+pub use call::{Call, TexImageData};
 
 mod file_stream;
 pub use file_stream::{FileRecording, FileStream};

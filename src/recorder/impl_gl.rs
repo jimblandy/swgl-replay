@@ -31,14 +31,26 @@ where
 {
     // If there is a buffer bound to PIXEL_UNPACK_BUFFER, then `offset` is an
     // offset; otherwise, it's an address.
-    let mut bound_buffer = [0];
+    let mut bound_buffer = 0;
     unsafe {
-        inner_gl.get_integer_v(gleam::gl::PIXEL_UNPACK_BUFFER_BINDING, &mut bound_buffer);
+        inner_gl.get_integer_v(gleam::gl::PIXEL_UNPACK_BUFFER_BINDING,
+                               std::slice::from_mut(&mut bound_buffer));
     }
-    if bound_buffer[0] != 0 {
+    if bound_buffer != 0 {
         TexImageData::Offset(offset)
     } else {
-        let length = gleam::gl::calculate_length(width, height, depth, format, ty);
+        let mut unpack_row_length = 0;
+        unsafe {
+            inner_gl.get_integer_v(gleam::gl::UNPACK_ROW_LENGTH,
+                                   std::slice::from_mut(&mut unpack_row_length));
+        }
+        let actual_width = if unpack_row_length != 0 {
+            assert!(width <= unpack_row_length);
+            unpack_row_length
+        } else {
+            width
+        };
+        let length = gleam::gl::calculate_length(actual_width, height, depth, format, ty);
         let slice = unsafe { std::slice::from_raw_parts(offset as *const u8, length) };
         TexImageData::Buf(check!(slice.to_call(call_stream)))
     }
@@ -70,6 +82,10 @@ macro_rules! general {
             // For debugging.
             $call_stream .flush()
                 .expect("gl-replay serialization failure");
+
+            if let Some(fingerprinter) = $self .fingerprinter {
+                fingerprinter(& $self .inner_gl, $call_stream);
+            }
 
             $returned
         }
