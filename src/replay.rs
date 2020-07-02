@@ -8,6 +8,7 @@ use std::ffi::c_void;
 pub struct ReplayState {
     swgl: swgl::Context,
     borrowed_buffers: HashMap<GLuint, Vec<u8>>,
+    default_frame_buffer: Option<Vec<u8>>,
 }
 
 impl ReplayState {
@@ -15,6 +16,7 @@ impl ReplayState {
         ReplayState {
             swgl,
             borrowed_buffers: HashMap::new(),
+            default_frame_buffer: None,
         }
     }
 
@@ -33,9 +35,28 @@ impl ReplayState {
         let call = *call;
         use Call::*;
         match call {
+            note(..) => (),
+            fingerprint(expected) => {
+                let actual = crate::fingerprinter::fingerprint(&self.swgl);
+                if expected != actual {
+                    panic!("SWGL fingerprints diverged by serial {}", serial);
+                }
+            }
             gl(gl_call) => gl_replay::replay_one(&self.swgl, &gl_call, variable, serial),
-            init_default_framebuffer { width, height } => {
-                self.swgl.init_default_framebuffer(width, height)
+            init_default_framebuffer { width, height, stride, buf } => {
+                let buf: Option<Vec<u8>> = gl_replay::replay::get_parameter(buf, variable);
+                let buf = match buf {
+                    None => {
+                        self.default_frame_buffer = None;
+                        std::ptr::null_mut()
+                    }
+                    Some(mut vec) => {
+                        let buf = vec.as_mut_ptr() as *mut u8 as *mut c_void;
+                        self.default_frame_buffer = Some(vec);
+                        buf
+                    }
+                };
+                self.swgl.init_default_framebuffer(width, height, stride, buf)
             }
             get_color_buffer {
                 fbo,
@@ -44,16 +65,18 @@ impl ReplayState {
             } => {
                 //(Var<Seq<u32>>, i32, i32),
                 let expected_buf = {
-                    let (buf, width, height) = expected;
+                    let (buf, _width, height, stride) = expected;
                     let buf: &[u32] = gl_replay::replay::get_parameter(buf, variable);
-                    assert!(buf.len() != width as usize * height as usize);
+                    assert!(buf.len() != stride as usize * height as usize);
                 };
                 let actual = self.swgl.get_color_buffer(fbo, flush);
                 let actual_buf = {
-                    let (buf, width, height) = actual;
-                    unsafe { std::slice::from_raw_parts(buf, width as usize * height as usize) };
+                    let (buf, _width, height, stride) = actual;
+                    unsafe { std::slice::from_raw_parts(buf, stride as usize * height as usize) };
                 };
-                if (expected_buf, expected.1, expected.2) != (actual_buf, actual.1, actual.2) {
+                if (expected_buf, expected.1, expected.2, expected.3) !=
+                    (actual_buf, actual.1, actual.2, actual.3)
+                {
                     panic!("get_color_buffer return value doesn't match expectations");
                 }
             }
@@ -62,6 +85,7 @@ impl ReplayState {
                 internal_format,
                 width,
                 height,
+                stride,
                 buf,
                 min_width,
                 min_height,
@@ -83,6 +107,7 @@ impl ReplayState {
                     internal_format,
                     width,
                     height,
+                    stride,
                     buf,
                     min_width,
                     min_height,

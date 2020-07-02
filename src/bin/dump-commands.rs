@@ -2,7 +2,8 @@ use docopt::Docopt;
 use serde::Deserialize;
 use std::io;
 
-use swgl_replay::FileRecording;
+use swgl_replay::{Call, FileRecording};
+use gl_replay::replay;
 
 const USAGE: &'static str = "
 Dump swgl-replay command log.
@@ -31,7 +32,15 @@ fn main() -> io::Result<()> {
         };
 
         for (i, call) in recording.calls.iter().enumerate() {
-            println!("{:4} {:?}", i, call);
+            match call {
+                Call::note(note) => {
+                    let note: &str = replay::get_parameter(*note, &recording.variable);
+                    println!("{:4} note: {:?}", i, note);
+                }
+                other => {
+                    println!("{:4} {:?}", i, other);
+                }
+            }
         }
     }
 

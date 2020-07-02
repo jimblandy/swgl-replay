@@ -2,10 +2,13 @@ use docopt::Docopt;
 use gl_replay::pixels::Pixels;
 use gl_replay::replay::Parameter;
 use gl_replay::Call as GlCall;
+use gl_replay::TexImageData;
 use serde::Deserialize;
 use swgl_replay::Call as SwglCall;
 use swgl_replay::FileRecording;
 
+use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::io;
 
 static USAGE: &str = "
@@ -31,19 +34,41 @@ fn main() -> io::Result<()> {
 
     let recording = FileRecording::open(args.arg_dir, swgl_replay::SWGR_MAGIC)?;
 
-    let mut count = 0;
+    let mut kinds = BTreeMap::new();
     for (i, call) in recording.calls.iter().enumerate() {
         match *call {
             SwglCall::gl(GlCall::read_pixels_into_buffer { x: _, y: _, pixels }) => {
                 let pixels = Pixels::from_call(pixels, &recording.variable);
                 let filename = format!("read_pixels_into_buffer-{}.png", i);
                 pixels.write_image(&filename);
-                count += 1;
+                *kinds.entry("read_pixels_into_buffer").or_insert(0) += 1;
+            }
+            SwglCall::gl(GlCall::tex_sub_image_3d_pbo {
+                width, height, depth, format, ty,
+                offset: TexImageData::Buf(var),
+                ..
+            }) => {
+                let bytes = <Vec<u8>>::from_call(var, &recording.variable);
+                let pixels = Pixels {
+                    width: width as usize,
+                    height: height as usize,
+                    depth: depth as usize,
+                    format,
+                    pixel_type: ty,
+                    bytes: Cow::from(bytes)
+                };
+
+                let filename = format!("tex_sub_image_3d_pbo-{}.png", i);
+                pixels.write_image(&filename);
+                *kinds.entry("tex_sub_image_3d_pbo").or_insert(0) += 1;
             }
             _ => (),
         }
     }
-    println!("wrote {} read_pixels_into_buffer images", count);
+
+    for (kind, count) in &kinds {
+        println!("wrote {} {} images", count, kind);
+    }
 
     Ok(())
 }

@@ -5,8 +5,8 @@ use std::ffi::c_void;
 
 /// A trait that covers all public methods of `swgl::Context`.
 pub trait Swgl: Gl {
-    fn init_default_framebuffer(&self, width: i32, height: i32);
-    fn get_color_buffer(&self, fbo: GLuint, flush: bool) -> (*mut c_void, i32, i32);
+    fn init_default_framebuffer(&self, width: i32, height: i32, stride: i32, buf: *mut c_void);
+    fn get_color_buffer(&self, fbo: GLuint, flush: bool) -> (*mut c_void, i32, i32, i32);
 
     fn set_texture_buffer(
         &self,
@@ -14,6 +14,7 @@ pub trait Swgl: Gl {
         internal_format: GLenum,
         width: GLsizei,
         height: GLsizei,
+        stride: GLsizei,
         buf: *mut c_void,
         min_width: GLsizei,
         min_height: GLsizei,
@@ -34,11 +35,11 @@ pub trait Swgl: Gl {
 }
 
 impl Swgl for swgl::Context {
-    fn init_default_framebuffer(&self, width: i32, height: i32) {
-        self.init_default_framebuffer(width, height)
+    fn init_default_framebuffer(&self, width: i32, height: i32, stride: i32, buf: *mut c_void) {
+        self.init_default_framebuffer(width, height, stride, buf)
     }
 
-    fn get_color_buffer(&self, fbo: GLuint, flush: bool) -> (*mut c_void, i32, i32) {
+    fn get_color_buffer(&self, fbo: GLuint, flush: bool) -> (*mut c_void, i32, i32, i32) {
         self.get_color_buffer(fbo, flush)
     }
 
@@ -48,6 +49,7 @@ impl Swgl for swgl::Context {
         internal_format: GLenum,
         width: GLsizei,
         height: GLsizei,
+        stride: GLsizei,
         buf: *mut c_void,
         min_width: GLsizei,
         min_height: GLsizei,
@@ -57,6 +59,7 @@ impl Swgl for swgl::Context {
             internal_format,
             width,
             height,
+            stride,
             buf,
             min_width,
             min_height,

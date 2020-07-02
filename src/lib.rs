@@ -21,6 +21,7 @@ mod call;
 mod dyn_swgl;
 mod impl_swgl;
 mod replay;
+mod fingerprinter;
 
 pub use call::Call;
 pub use dyn_swgl::Swgl;
@@ -41,7 +42,11 @@ impl FileRecorder {
     /// `inner_swgl` to a recording saved as a directory named `dir`.
     pub fn create<P: AsRef<Path>>(inner_swgl: swgl::Context, dir: P) -> io::Result<FileRecorder> {
         let file_stream = FileStream::create(dir, SWGR_MAGIC)?;
-        Ok(FileRecorder(Recorder::new(inner_swgl, file_stream)))
+        Ok(FileRecorder(Recorder::with_fingerprinter(
+            inner_swgl,
+            file_stream,
+            Some(fingerprinter::fingerprinter),
+        )))
     }
 }
 

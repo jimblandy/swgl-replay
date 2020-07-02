@@ -1,6 +1,6 @@
 //! The `swgl_replay::Call` type.
 
-use gl_replay::form::{Seq, Var};
+use gl_replay::form::{Seq, Str, Var};
 use gl_replay::raw;
 use gleam::gl::{GLenum, GLint, GLsizei, GLuint};
 
@@ -20,21 +20,31 @@ impl From<gl_replay::Call> for Call {
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone, Debug)]
 pub enum Call {
+    /// A note injected into the recording by the application, for correlating
+    /// individual calls with higher-level activity (specific reftests, say).
+    note(Var<Str>),
+
+    /// A fingerprint of SWGL's internal state, for use in detecting divergence.
+    fingerprint(u64),
+
     gl(gl_replay::Call),
     init_default_framebuffer {
         width: i32,
         height: i32,
+        stride: i32,
+        buf: Option<Var<Seq<u8>>>,
     },
     get_color_buffer {
         fbo: GLuint,
         flush: bool,
-        returned: (Var<Seq<u32>>, i32, i32),
+        returned: (Var<Seq<u32>>, i32, i32, i32),
     },
     set_texture_buffer {
         tex: GLuint,
         internal_format: GLenum,
         width: GLsizei,
         height: GLsizei,
+        stride: GLsizei,
         buf: Option<Var<Seq<u8>>>,
         min_width: GLsizei,
         min_height: GLsizei,

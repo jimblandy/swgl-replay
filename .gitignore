@@ -3,4 +3,5 @@ Cargo.lock
 expected.png
 actual.png
 read_pixels_into_buffer-*.png
+tex_sub_image_3d_pbo-*.png
 perf.data*
