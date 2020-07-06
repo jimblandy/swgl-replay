@@ -20,16 +20,19 @@ pub struct Recorder<G, Cs> {
 }
 
 impl<G, Cs> Recorder<G, Cs> {
-    pub fn with_fingerprinter(inner_gl: G, call_stream: Cs, fingerprinter: Option<fn(&G, &mut Cs)>) -> Recorder<G, Cs> {
+    pub fn new(inner_gl: G, call_stream: Cs) -> Recorder<G, Cs> {
         Recorder {
             inner_gl,
             call_stream: sync::Mutex::new(call_stream),
-            fingerprinter
+            fingerprinter: None
         }
     }
 
-    pub fn new(inner_gl: G, call_stream: Cs) -> Recorder<G, Cs> {
-        Recorder::with_fingerprinter(inner_gl, call_stream, None)
+    pub fn with_fingerprinter(self, fingerprinter: fn(&G, &mut Cs)) -> Self {
+        Recorder {
+            fingerprinter: Some(fingerprinter),
+            .. self
+        }
     }
 
     pub fn inner_gl(&self) -> &G {
