@@ -32,7 +32,7 @@ pub use replay::ReplayState;
 pub type FileStream = gl_replay::FileStream<Call>;
 
 /// A `gl_replay` recorder for SWGL ncalls.
-pub type InnerRecorder = Recorder<swgl::Context, gl_replay::FileStream<Call>>;
+pub type InnerRecorder = Recorder<swgl::Context, FileStream>;
 
 /// A wrapper for `swgl::Context` that records all method calls to files.
 pub struct FileRecorder(InnerRecorder);
@@ -42,11 +42,11 @@ impl FileRecorder {
     /// `inner_swgl` to a recording saved as a directory named `dir`.
     pub fn create<P: AsRef<Path>>(inner_swgl: swgl::Context, dir: P) -> io::Result<FileRecorder> {
         let file_stream = FileStream::create(dir, SWGR_MAGIC)?;
-        Ok(FileRecorder(Recorder::with_fingerprinter(
-            inner_swgl,
-            file_stream,
-            Some(fingerprinter::fingerprinter),
-        )))
+        Ok(FileRecorder(Recorder::new(inner_swgl, file_stream)))
+    }
+
+    pub fn with_fingerprinter(self) -> Self {
+        FileRecorder(Recorder::with_fingerprinter(self.0, fingerprinter::fingerprinter))
     }
 }
 
